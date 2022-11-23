@@ -1,11 +1,10 @@
 import discord
-from helpers.other import permissions as p
-
-permissions = p.Permissions()
+from helpers.other.permissions import Permissions
 
 
-@permissions.register_command()
+@Permissions.register_command(None)
 async def invite(data):
+	"""Sends an invitation link for the bot"""
 	channel = data.message.channel
 	client = data.client
 	

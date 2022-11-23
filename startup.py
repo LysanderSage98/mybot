@@ -1,44 +1,68 @@
+import discord
 import threading
 import os
-
+import pathlib
+try:
+	pass
+	# os.remove("data/MyBot.db")
+	# os.remove("data/MyBot.db-journal")
+except FileNotFoundError:
+	pass
+from helpers.other import responder
 from modules import bot, music, gui
 
-modules = ([], [])
+# modules = ([], [])
 
-for f in os.listdir("."):
-	if os.path.isdir(f):
-		modules[1].append(f)
-	else:
-		modules[0].append(f[:-3])
+# for f in os.listdir("."):
+# 	f = pathlib.Path(f)
+# 	if f.is_dir():
+# 		modules[1].append(f.name)
+# 	elif f.stem == "py":
+# 		modules[0].append(f.name)
 
 
 class Holder:
-	def __init__(self, _bot = None, _music = None, _gui = None):
-		self.music = _music
+	def __init__(self, responder_class, _bot = None, _music = None, _gui = None):
+		self.music: music.CreateDownloader = _music
 		self.gui = _gui
-		self.bot = _bot(self.reload, gui, None)
+		self.bot: bot.Bot = _bot(self.reload, responder_class, self.gui, self.music, intents = discord.Intents.all())
+		self.threads = {}
 		if self.bot:
-			self.bot_thread = threading.Thread(target = self.bot.run)
-			self.bot_thread.start()
+			thread = threading.Thread(target = self.bot.run)
+			self.threads["bot_thread"] = thread
+			thread.start()
 			if self.music:
-				self.music_thread = threading.Thread(target = self.music)
-				self.music_thread.start()
+				# noinspection PyTypeChecker
+				thread = threading.Thread(target = self.music, args = [responder_class])
+				self.threads["music_thread"] = thread
+				thread.start()
 			if self.gui:
-				self.gui_thread = threading.Thread(target = self.gui, args = [self.bot.loop, self.bot])
-				self.gui_thread.start()
+				thread = threading.Thread(target = self.gui, args = [self.bot.loop, self.bot, responder_class])
+				self.threads["gui_thread"] = thread
+				thread.start()
+		self.join()
+
+	def join(self):
+		for thread in self.threads.values():
+			try:
+				thread.join()
+			except Exception as e:
+				print(e)
 
 	def reload(self):
 		if self.music:
 			print("stop music")
-			self.music_thread.join()
-			self.music_thread = threading.Thread(target = self.music)
-			self.music_thread.start()
+			self.music.queue.put(None)
+			# noinspection PyTypeChecker
+			self.threads["music_thread"] = threading.Thread(target = self.music)
+			self.threads["music_thread"].start()
 		if self.gui:
 			gui.fill_queue("STOP")
-			self.gui_thread.join()
-			self.gui_thread = threading.Thread(target = self.gui, args = [self.bot.loop, self.bot])
-			self.gui_thread.start()
+			self.threads["gui_thread"] = threading.Thread(target = self.gui, args = [self.bot.loop, self.bot])
+			self.threads["gui_thread"].start()
+		self.join()
 
 
-runner = Holder(bot.Bot, None, gui.Gui)
-print("Starting")
+if __name__ == '__main__':
+	print("Starting")
+	runner = Holder(responder.Responder(), bot.Bot, music.CreateDownloader, None)

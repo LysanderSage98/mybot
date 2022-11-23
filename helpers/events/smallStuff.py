@@ -1,5 +1,5 @@
 import discord
-from helpers.other import db_handler as db
+from helpers.other import db_stuff as db
 
 
 def typing_handler(channel, user, when, client):
@@ -15,7 +15,7 @@ async def voice_state_handler(member, before, after, client):
 	if member == client.user:
 		return
 	print(member, before, end = "")
-	coll = db.db.get_collection("Data")
+	coll = db.db.get_collection("User")
 	
 	if before.channel is None:
 		print(" no channel change")
@@ -29,7 +29,7 @@ async def voice_state_handler(member, before, after, client):
 			print(" pass")
 			return
 		
-		elif not coll.find_one({"id": member.id, "re-move": True}):
+		elif not coll.find_one({"id": member.id, "move": True}):
 			print(" disabled")
 			return
 		

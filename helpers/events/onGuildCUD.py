@@ -1,4 +1,4 @@
-from helpers.other import db_handler as db
+from helpers.other import db_stuff as db
 
 
 def guild_handler(guild):

@@ -1,0 +1,9 @@
+import discord
+from helpers.other.permissions import Permissions
+
+
+@Permissions.register_command({perm})
+async def {cmd}(data):
+	"""{desc}"""
+	data.error = "Not implemented yet"
+	return data

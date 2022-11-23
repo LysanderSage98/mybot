@@ -3,20 +3,21 @@ import json
 import traceback
 
 import helpers.events as events
-from helpers.other import responder
+import helpers.other.responder as r
 
 
 class Bot(discord.Client):
 
-	def __init__(self, func, gui = None, music = None, **options):
+	def __init__(self, func, responder, gui = None, music = None, **options):
 		super().__init__(**options)
 		self.restarter = func
 		self.started = 0
 		self.gui = gui
 		self.music_player = music
-		self.responder = responder.Responder()
+		self.responder: r.Responder = responder
 		self.status_changer = None
 		self.owner = None
+		self.prefix = json.load(open("data/info.json", "r"))["prefix"]
 
 		@self.event
 		async def on_connect():
@@ -30,16 +31,13 @@ class Bot(discord.Client):
 
 		@self.event
 		async def on_message(message):
-			if message.author == self.user:
-				return
-			else:
+			if message.author != self.user:
 				try:
 					error = await events.onMessage.message_handler(message, self)
-					if not error:
-						return
-					else:
+					if error:
 						await message.channel.send(embed = self.responder.emb_resp2(error))
 				except Exception as e:
+					raise e
 					print(e, e.__traceback__)
 
 		@self.event
@@ -81,6 +79,6 @@ class Bot(discord.Client):
 			await events.smallStuff.voice_state_handler(member, before, after, self)
 
 	def run(self, *args, **kwargs):
-		token = json.load(open("data/info.json", "r"))["token"]
+		token = json.load(open("data/info.json", "r"))["token2"]
 		print("bot started")
 		super().run(token, *args, **kwargs)

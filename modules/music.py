@@ -1,19 +1,21 @@
 import discord
+import os
 import threading
 import queue
 import re
 import youtube_dl as yt
 
-from helpers.other import db_handler as db, utilities as u
+from helpers.other import utilities as u
 
 music_queues = {}
 player_queues = {}
 
 
 class Player(threading.Thread):
-	def __init__(self, client, name, path, a_loop, v_c, channel):
+	def __init__(self, responder, client, name, path, a_loop, v_c, channel):
 		super().__init__(name = name)
 		# self.sources = []
+		self.responder = responder
 		self.queue = queue.Queue()
 		self.audioplayer = None
 		self.client = client
@@ -46,7 +48,7 @@ class Player(threading.Thread):
 					desc, tag = self.f.split("\\")[-1].rsplit(".", 1)[0].rsplit("°°__°°", 1)
 					user = self.f.split("\\")[-2]
 					desc_final = f"[{discord.utils.escape_markdown(desc)}]({u.concat(tag)})"
-					embed = r.emb_resp(title, desc_final, "info")
+					embed = self.responder.emb_resp(title, desc_final, "info")
 					embed.set_author(name = f"Requested by {self.client.get_user(int(user))}")
 					await self.channel.send(embed = embed, delete_after = 60.0)
 				
@@ -129,7 +131,7 @@ class Player(threading.Thread):
 			
 			else:
 				self.loop.create_task(self.channel.send(
-					embed = r.emb_resp("Invalid loop parameter!", "Defaulting to \"all\"!", "error_2")))
+					embed = self.responder.emb_resp("Invalid loop parameter!", "Defaulting to \"all\"!", "error_2")))
 				self.queue.put(self.f)
 				# self.sources.append(src)
 				self.repeat = "all"
@@ -138,7 +140,8 @@ class Player(threading.Thread):
 
 
 class Downloader:
-	def __init__(self, **d):
+	def __init__(self, responder, **d):
+		self.responder = responder
 		self.path = "other stuff\\music\\" + str(d.get("author").id) + "\\"
 		self.ytdl = yt.YoutubeDL({
 			"quiet": True,
@@ -155,6 +158,7 @@ class Downloader:
 		
 		if not player_queues.get(self.key):
 			self.player = Player(
+				self.responder,
 				d.get("client"),
 				self.key,
 				self.path,
@@ -213,12 +217,12 @@ class Downloader:
 					if not entries:
 						# print(res)
 						entries = [res]
-						self.loop.create_task(item["msg"].edit(embed = r.emb_resp("Song found!", "", "success")))
+						self.loop.create_task(item["msg"].edit(embed = self.responder.emb_resp("Song found!", "", "success")))
 					
-					links = list(filter(None, map(lambda x: concat(x["id"] if x else None), entries)))
+					links = list(filter(None, map(lambda x: u.concat(x["id"] if x else None), entries)))
 					
 					if len(links) == 1:
-						self.loop.create_task(item["msg"].edit(embed = r.emb_resp("Downloading!", links[0], "success")))
+						self.loop.create_task(item["msg"].edit(embed = self.responder.emb_resp("Downloading!", links[0], "success")))
 						self.ytdl.download(links)
 					elif len(links) > 1:
 						for link in links:
@@ -243,7 +247,7 @@ class Downloader:
 								self.player.queue.put_nowait(self.path + source.name)
 								pos = self.player.queue.qsize()
 								text = f"Added `{source.name.rsplit('°°__°°')[0]}` to queue at position {pos}!"
-								embed = r.emb_resp("Info", text, "success")
+								embed = self.responder.emb_resp("Info", text, "success")
 								self.loop.create_task(self.channel.send(embed = embed, delete_after = 5.0))
 								
 								if not self.player.started:
@@ -251,9 +255,9 @@ class Downloader:
 									self.player.started = 1
 				
 				self.loop.create_task(
-					item["msg"].edit(embed = r.emb_resp("Done!", "", "ok")))  # self.queue.put_nowait(None)
+					item["msg"].edit(embed = self.responder.emb_resp("Done!", "", "ok")))  # self.queue.put_nowait(None)
 			except Exception as e:
-				self.loop.create_task(self.channel.send(embed = r.emb_resp2(str(e))))
+				self.loop.create_task(self.channel.send(embed = self.responder.emb_resp2(str(e))))
 
 
 class CreateDownloader:
@@ -261,8 +265,9 @@ class CreateDownloader:
 	queue = queue.Queue()
 	"""collect url and info about request"""
 	
-	def __init__(self):
+	def __init__(self, responder):
 		self.create()
+		self.responder = responder
 	
 	def create(self):
 		
@@ -270,7 +275,7 @@ class CreateDownloader:
 			try:
 				threads = [x.name for x in threading.enumerate()]
 				print(threads)
-				# print("Waiting!")
+				print("Waiting!")
 				arg = self.queue.get(block = True)
 				if not arg:  # put "None" or equivalent in queue to stop bot
 					break
@@ -297,7 +302,7 @@ class CreateDownloader:
 							music_queues[key] = q
 							q.put(arg)
 							arg["queue"] = q
-							threading.Thread(name = key, target = Downloader, kwargs = arg).start()
+							threading.Thread(name = key, target = Downloader, args = [self.responder], kwargs = arg).start()
 						else:
 							music_queues[key].put(arg)
 				elif arg["type"] == "gui":

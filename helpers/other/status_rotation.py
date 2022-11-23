@@ -1,20 +1,21 @@
 import asyncio
 import discord
 import random
-from helpers.other import db_handler as db
+from helpers.other import db_stuff as db
 
 
 class StatusRotation:
 	def __init__(self, bot):
 		self.client = bot
-		self.edit = asyncio.Event(loop = self.client.loop)
-		self.coll = db.db.get_collection(name = "Lists")
-		self.data = self.coll.find_one({"name": "statuses"})
+		self.edit = asyncio.Event()
+		self.coll = db.db.get_collection(name = "Statuses")
+		self.data = [el["status"] for el in self.coll.find()]
+
 		if not self.data:
-			self.coll.insert_one({"name": "statuses", "statuses": ["test"]})
+			self.coll.insert_one({"status": "test"})
 			self.statuses = ["test"]
 		else:
-			self.statuses = self.data["statuses"]
+			self.statuses = self.data
 		
 		self.edit.set()
 		self.task = self.client.loop.create_task(self.change_status())

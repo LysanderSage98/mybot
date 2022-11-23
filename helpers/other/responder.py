@@ -15,7 +15,7 @@ class Responder:
 
     def emb_resp(self, title: str = "", desc: str = "", color: str = None, url: str = "") -> discord.Embed:
         """Any basic embed object"""
-        color = self.colors[color] if color else discord.Embed.Empty
+        color = self.colors[color] if color else None
         return discord.Embed(title = title, description = desc, url = url, color = color)
 
     def emb_resp2(self, msg: str) -> discord.Embed:

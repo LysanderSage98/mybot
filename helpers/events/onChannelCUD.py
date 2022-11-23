@@ -1,5 +1,5 @@
 import discord
-from helpers.other import db_handler as db
+from helpers.other import db_stuff as db
 
 
 async def private_channel_handler(*args, cud = None):
