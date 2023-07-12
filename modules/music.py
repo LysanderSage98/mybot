@@ -18,7 +18,7 @@ class Player(threading.Thread):
 		self.responder = responder
 		self.queue = queue.Queue()
 		self.audioplayer = None
-		self.client = client
+		self.bot = client
 		self.path = path
 		self.started = 0
 		self.loop = a_loop
@@ -47,9 +47,9 @@ class Player(threading.Thread):
 					title = "🎵 Now playing:"
 					desc, tag = self.f.split("\\")[-1].rsplit(".", 1)[0].rsplit("°°__°°", 1)
 					user = self.f.split("\\")[-2]
-					desc_final = f"[{discord.utils.escape_markdown(desc)}]({u.concat(tag)})"
+					desc_final = f"[{discord.utils.escape_markdown(desc)}]({u.to_yt_url(tag)})"
 					embed = self.responder.emb_resp(title, desc_final, "info")
-					embed.set_author(name = f"Requested by {self.client.get_user(int(user))}")
+					embed.set_author(name = f"Requested by {self.bot.get_user(int(user))}")
 					await self.channel.send(embed = embed, delete_after = 60.0)
 				
 				self.loop.create_task(info())
@@ -219,7 +219,7 @@ class Downloader:
 						entries = [res]
 						self.loop.create_task(item["msg"].edit(embed = self.responder.emb_resp("Song found!", "", "success")))
 					
-					links = list(filter(None, map(lambda x: u.concat(x["id"] if x else None), entries)))
+					links = list(filter(None, map(lambda x: u.to_yt_url(x["id"] if x else None), entries)))
 					
 					if len(links) == 1:
 						self.loop.create_task(item["msg"].edit(embed = self.responder.emb_resp("Downloading!", links[0], "success")))

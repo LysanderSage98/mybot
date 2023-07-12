@@ -1,5 +1,5 @@
 import discord
-from helpers.other.permissions import Permissions
+from helpers.other.permissions import Permissions, db
 from . import import_cmds, Result
 
 
@@ -11,7 +11,7 @@ async def reload(data: Result):
 	else:
 		reloaded = import_cmds()
 	await data.message.channel.send(
-		embed = data.client.responder.emb_resp(
+		embed = data.bot.responder.emb_resp(
 			desc = f"Reloaded ```{', '.join(reloaded)}```",
 			color = "success"
 		)

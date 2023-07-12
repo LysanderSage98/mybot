@@ -6,7 +6,7 @@ from helpers.other import db_stuff as db
 
 class StatusRotation:
 	def __init__(self, bot):
-		self.client = bot
+		self.bot = bot
 		self.edit = asyncio.Event()
 		self.coll = db.db.get_collection(name = "Statuses")
 		self.data = [el["status"] for el in self.coll.find()]
@@ -18,7 +18,7 @@ class StatusRotation:
 			self.statuses = self.data
 		
 		self.edit.set()
-		self.task = self.client.loop.create_task(self.change_status())
+		self.task = self.bot.loop.create_task(self.change_status())
 	
 	async def change_status(self):
 		while True:
@@ -27,7 +27,7 @@ class StatusRotation:
 			
 			for status in statuses:
 				if await self.edit.wait():
-					await self.client.change_presence(activity = discord.Game(name = status))
+					await self.bot.change_presence(activity = discord.Game(name = status))
 				await asyncio.sleep(180)
 
 	def update(self):
@@ -35,7 +35,7 @@ class StatusRotation:
 
 	async def change(self, value, duration = None):
 		self.edit.clear()
-		await self.client.change_presence(activity = discord.Game(name = value))
+		await self.bot.change_presence(activity = discord.Game(name = value))
 		if duration:
 			await asyncio.sleep(duration)
 			self.edit.set()

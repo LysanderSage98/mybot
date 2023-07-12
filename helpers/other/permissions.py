@@ -4,6 +4,7 @@ import typing
 import discord
 
 from . import db_stuff as db
+from .collections import Collection
 
 
 def normalize_types(func):
@@ -70,6 +71,9 @@ class PermHierarchy(str):
 	def __repr__(self):
 		return str(self.me)
 
+	def __str__(self):
+		return str(self.me)
+
 
 class All(PermHierarchy):
 	_instance = None
@@ -81,7 +85,7 @@ class All(PermHierarchy):
 
 	def __init__(self):
 		super().__init__()
-		self.me = None
+		self.me = ""
 
 
 class Admin(PermHierarchy):
@@ -113,27 +117,28 @@ class Owner(PermHierarchy):
 PermHierarchy()
 PermHierarchy.update_classes(
 	{
-		None: All,
+		"": All,
 		"admin": Admin,
 		"owner": Owner
 	}
 )
 
+commands: dict[str, tuple[typing.Coroutine, PermHierarchy, dict[str, typing.Any]]] = {}
+Collection("commands", commands)
+
 
 class Permissions:
-	commands: dict[str, tuple[typing.Coroutine, PermHierarchy]] = {}
 	settings: db.database.Collection = db.db.get_collection(name = "Settings")
 	command_list: db.database.Collection = db.db.get_collection(name = "Commands")
 	
 	def __init__(self, result_object = None):
-		self.prefix = ""
 		if result_object:
 			self.__class__.result_object = result_object
 		else:
 			self.result_object = None
 
 	@classmethod
-	def register_command(cls, perm):
+	def register_command(cls, perm, slash_args: dict[str, typing.Any] = None):
 		def res(coroutine: typing.Coroutine):
 			cls.command_list.update_one(
 				{
@@ -142,72 +147,125 @@ class Permissions:
 					"$set": {
 						"permission": perm,
 						"name": coroutine.__name__,
+						"desc": coroutine.__doc__.split("``````py", 1)[0].strip(),
 					},
 					"$setOnInsert": {
 						"aliases": [],
-						"desc": coroutine.__doc__,
 						"usage": "{prefix}" + coroutine.__name__,
 						"usage_ex": "",
 						"added_by": {
 							"id": 435104102599360522,
-							"name": "LysanderSage98"
+							"name": "lysandersage98"
 						},
 						"added_on": datetime.datetime.utcnow().timestamp(),
 					}
 				}, upsert = True
 			)
 			cl = PermHierarchy.classes[perm]
-			cls.commands.update({coroutine.__name__: (coroutine, cl())})
-			print("="*100 + "\n", cls.commands, "\n" + "="*100)
+			commands.update(
+				{
+					coroutine.__name__: (
+						coroutine,
+						cl(),
+						slash_args or {}
+					)
+				}
+			)
+			print("="*100 + "\n", commands, "\n" + "="*100)
 			return coroutine
 		return res
-	
-	# def update_settings(self):
-	# 	self.settings = db.db.get_collection(name = "Settings")
-	
-	def check(self, message: discord.Message, bot):
-		guild = message.guild
+
+	@classmethod
+	def get_perms(cls, bot, req_perm, src: typing.Union[discord.Interaction, discord.Message]):
+		user = getattr(src, "user", getattr(src, "author", None))
+		if user == bot.owner:
+			has_perm = Owner()
+		elif src.channel.permissions_for(user).administrator:
+			has_perm = Admin()
+		elif not req_perm:
+			has_perm = All()
+		else:
+			has_perm = All()  # todo might need update
+
+		return has_perm
+
+	@classmethod
+	def check_perms_for(cls, cmd: str, perm: PermHierarchy):
+		req_perm = commands.get(cmd)[1]
+		print(f"Comparing {perm} with {req_perm}")
+		return perm >= req_perm
+
+	def validate_interaction(self, interaction: discord.Interaction, bot):
+		guild = interaction.guild
 		guild_settings = None
+		prefix = bot.prefix
 		if guild:
 			setting = self.__class__.settings.find_one({"guild": guild.id})
 			guild_settings = setting.get("guild_settings") if setting else None
 			if guild_settings:
 				# print(guild_settings)
 				prefix = guild_settings.get("prefix")
-				if prefix:
-					# print(prefix)
-					self.prefix = prefix
-				else:
-					self.prefix = bot.prefix
+			else:
+				raise RuntimeError("No guild settings found for guild", guild.name)
+		# print(message)
+		func = commands.get(interaction.data["name"])
+		result = self.__class__.result_object(bot, interaction)
+		result.command = interaction.data["name"]
+		result.args = [el["value"] for el in (interaction.data.get("options") or [])]
+		result.prefix = prefix
+		if func:
+			print("func data in permissions.check:", func)
+			result.function = func[0]
+			req_perm = func[1]
+			if guild_settings:
+				overwrites_for_cmd = guild_settings.get(interaction.data["name"])
+				if overwrites_for_cmd:
+					print("perm overwrites_for_cmd", overwrites_for_cmd)
+
+			has_perm = self.get_perms(bot, req_perm, interaction)
+			result.user = (interaction.user, has_perm)
+			if has_perm < req_perm:
+				result.error = "Missing permission " + str(req_perm)
+		result.valid = True
+		return result
+
+	def validate_msg(self, message: discord.Message, bot):
+		guild = message.guild
+		guild_settings = None
+		prefix = bot.prefix
+		if guild:
+			setting = self.__class__.settings.find_one({"guild": guild.id})
+			guild_settings = setting.get("guild_settings") if setting else None
+			if guild_settings:
+				# print(guild_settings)
+				prefix = guild_settings.get("prefix")
 			else:
 				raise RuntimeError("No guild settings found for guild", guild.name)
 
-		if message.content.startswith(self.prefix):
+		if message.content.startswith(prefix):
 			# print(message)
-			content = message.content.strip(self.prefix)
-			command_args = content.split(" ", 1)
-			func = self.__class__.commands.get(command_args[0])
-			result = self.__class__.result_object(bot, message, True)
+			content = message.content.strip(prefix)
+			command_args = content.split(" ")
+			func = commands.get(command_args[0])
+			if not func:
+				cmd = self.command_list.find_one({"aliases": command_args[0]})
+				func = commands.get(cmd.get("name")) if cmd else None
+			result = self.__class__.result_object(bot, message)
 			result.command = command_args[0]
 			result.args = command_args[1:]
-			result.prefix = self.prefix
+			result.prefix = prefix
 			if func:
-				print(func)
+				print("func data in permissions.check:", func)
 				result.function = func[0]
 				req_perm = func[1]
 				if guild_settings:
-					overwrites = guild_settings.get(command_args[0])
-					if overwrites:
-						print(overwrites)
-				if message.author == bot.owner:
-					perm = Owner()
-				elif message.channel.permissions_for(message.author).administrator:
-					perm = Admin()
-				elif not req_perm:
-					perm = All()
-				else:
-					perm = All()  # todo might need update
-				result.user = (message.author, perm)
-				if perm < req_perm:
+					overwrites_for_cmd = guild_settings.get(command_args[0])
+					if overwrites_for_cmd:
+						print("perm overwrites_for_cmd", overwrites_for_cmd)
+
+				has_perm = self.get_perms(bot, req_perm, message)
+				result.user = (message.author, has_perm)
+				if has_perm < req_perm:
 					result.error = "Missing permission " + str(req_perm)
+			result.valid = True
 			return result

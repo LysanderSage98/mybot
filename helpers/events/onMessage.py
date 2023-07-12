@@ -1,4 +1,6 @@
 import discord
+import traceback
+
 import helpers.other.utilities as u
 
 from bot_commands import Result
@@ -7,21 +9,50 @@ permissions = p.Permissions(Result)
 
 
 async def message_handler(message: discord.Message, bot):
-	result = await bot.loop.run_in_executor(None, permissions.check, message, bot)
-	print(result)
+	result = await bot.loop.run_in_executor(None, permissions.validate_msg, message, bot)
+	print("message handler result\n", result)
 	if result:
-		if result.function:
-			if not result.error:
-				result = await result.function(result)
-				print("after command execution\n", result)
-				if result:
-					return 0
-				else:
-					return result.error
-			else:
-				return result.error
+		temp = await do_stuff(result)
+		if type(temp) == tuple:
+			res, info = temp
+			await message.channel.send(**info)
 		else:
-			try:
-				return await u.cmd_adder(result)
-			except Exception as e:
-				return e.with_traceback(e.__traceback__)
+			res = temp
+		if type(res) != Result or result.error:
+			return res
+
+
+async def interaction_handler(interaction: discord.Interaction, **params):
+	print(params)
+	bot = interaction.client
+	result = await bot.loop.run_in_executor(None, permissions.validate_interaction, interaction, bot)
+	print("interaction handler input\n", result)
+	if result:
+		await interaction.response.defer()
+		try:
+			temp = await do_stuff(result)
+			print("after command execution\n", result)
+			if type(temp) == tuple:
+				res, info = temp
+				await interaction.followup.send(**info)
+			else:
+				res = temp
+			if type(res) != Result or result.error:
+				await interaction.followup.send(res)
+		except Exception as e:
+			txt = f"{repr(e)}\n{traceback.format_tb(e.__traceback__)[-1]}"
+			await interaction.followup.send(embed = bot.responder.emb_resp2(txt))
+
+	return interaction
+
+
+async def do_stuff(data):
+	if data.function:
+		if not data.error:
+			return await data.function(data)
+		return data.error
+	else:
+		try:
+			return await u.cmd_adder_ui(data)
+		except Exception as e:
+			return "".join(traceback.format_tb(e.__traceback__)) + repr(e)

@@ -4,6 +4,7 @@ import sqlite3
 import sys
 import threading
 
+import pymongo.database
 from pymongo import MongoClient, errors, database
 from typing import Union
 
@@ -562,18 +563,21 @@ class Mongo:
 	__slots__ = ["db", "sql"]
 
 	def __new__(cls, sql_fallback):
+		instance = super().__new__(cls)
 		try:
 			client = MongoClient(serverSelectionTimeoutMS = 5000)
 			client.admin.command("ping")
-			instance = super().__new__(cls)
 			instance.__setattr__("db", client.get_database(name = "MyBot"))
 			instance.__setattr__("sql", sql_fallback)
-			# instance._update()
+		# instance._update()
 		except errors.ConnectionFailure:
-			# print("mongodb connection failure, using SQL")
-			instance = sql_fallback
+			print("mongodb connection failure, using SQL")
+			instance.__setattr__("db", sql_fallback)
 		# instance = super().__new__(cls, sql)
 		return instance
+
+	def __getattr__(self, item):
+		return getattr(self.db, item)
 
 	# def __init__(self, sql_fallback):
 		# print("init with", sql_fallback)
@@ -600,5 +604,14 @@ class DB:
 		return getattr(self.db, item)
 
 
-db = DB()
-# print(db)
+def get_db() -> pymongo.database.Database:
+	db_obj = ...
+	try:
+		db_obj = DB()
+		print(db_obj.db)
+	except sqlite3.OperationalError:
+		pass
+	return db_obj
+
+
+db = get_db()

@@ -60,7 +60,7 @@ class Gui(tk.Tk):
 		self.frames = []
 		self.obj = []
 		self.loop = loop
-		self.client = client
+		self.bot = client
 		self.frame = tk.Frame(self)
 		button = tk.Button(self.frame, name = "button", text = "Send!", command = self.dm)
 		entry = tk.Entry(self.frame, name = "entry")
@@ -78,7 +78,7 @@ class Gui(tk.Tk):
 	def dm(self):
 		_id, message = self.frame.children["entry"].get().split(" ", 1)
 		self.frame.children["entry"].delete(0, "end")
-		self.queue.put({self.client.get_user(int(_id)): message})
+		self.queue.put({self.bot.get_user(int(_id)): message})
 		self.event.set()
 	
 	def check(self):
