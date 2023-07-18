@@ -1,7 +1,6 @@
 import datetime
-import typing
-
 import discord
+import typing
 
 from . import db_stuff as db
 from .collections import Collection
@@ -66,7 +65,7 @@ class PermHierarchy(str):
 		return self.perms[self] <= self.perms[other]
 
 	def __bool__(self):
-		return bool(self.me)
+		return self.me == "owner"
 
 	def __repr__(self):
 		return str(self.me)
@@ -211,7 +210,7 @@ class Permissions:
 		func = commands.get(interaction.data["name"])
 		result = self.__class__.result_object(bot, interaction)
 		result.command = interaction.data["name"]
-		result.args = [el["value"] for el in (interaction.data.get("options") or [])]
+		result.args = {el["name"]: el["value"] for el in (interaction.data.get("options") or [])}
 		result.prefix = prefix
 		if func:
 			print("func data in permissions.check:", func)
@@ -252,7 +251,7 @@ class Permissions:
 				func = commands.get(cmd.get("name")) if cmd else None
 			result = self.__class__.result_object(bot, message)
 			result.command = command_args[0]
-			result.args = command_args[1:]
+			result.args = {x: y for x, y in enumerate(command_args[1:])}
 			result.prefix = prefix
 			if func:
 				print("func data in permissions.check:", func)

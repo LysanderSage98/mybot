@@ -1,4 +1,6 @@
 import datetime
+import discord
+
 
 from helpers.other.permissions import Permissions, PermHierarchy
 from helpers.other.collections import Collection
@@ -19,6 +21,7 @@ async def help(data: Result):
 	"()" = group
 	"|"  = only one of the separated options
 	"''" = literal value
+	"%%" = numeric value
 	``````py
 	command: str
 		the command to get help for"""
@@ -26,7 +29,7 @@ async def help(data: Result):
 	cmds = Permissions.command_list
 
 	if data.args:
-		single = data.args[0]
+		single = data.args.get(0, data.args.get("command"))
 		title = f"Help for {Md(single).snippet().bold()}"
 	else:
 		title = "Command overview"
@@ -41,17 +44,20 @@ async def help(data: Result):
 
 	elif single:
 		cmd = found[0]
+		desc = cmd["desc"]
+		usage = cmd["usage"]
+
 		embed.add_field(
 			name = "Aliases (only relevant for non-slash usage)",
 			value = Md.sn(", ".join(cmd["aliases"])) if cmd["aliases"] else "None",
 			inline = False)
 		embed.add_field(
 			name = "Description",
-			value = Md.cb("py\n" + cmd["desc"]),
+			value = Md.cb("py\n" + desc),
 			inline = False)
 		embed.add_field(
 			name = "Usage",
-			value = Md.cb(cmd["usage"].format(prefix = data.prefix)),
+			value = Md.cb(usage.format(prefix = data.prefix)),
 			inline = False)
 		embed.add_field(
 			name = "Usage example",
@@ -69,7 +75,7 @@ async def help(data: Result):
 		out += "```"
 		embed.description = out
 
-	embed.set_footer(text = "You might want to do ^help help to get a better understanding of the command usage")
+	embed.set_footer(text = f"You might want to do {data.prefix}help help to get a better understanding of the command usage")
 
 	to_send = {
 		"embed": embed

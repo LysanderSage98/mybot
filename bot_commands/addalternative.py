@@ -31,8 +31,8 @@ async def addalternative(data: Result):
 		)
 		return data, {"embed": embed}
 
-	cmd_name = data.args[0]
-	alt_name = data.args[1]
+	cmd_name = data.args.get(0, data.args.get("command"))
+	alt_name = data.args.get(1, data.args.get("alt_name"))
 
 	coll = db.db.get_collection(name = "Commands")
 	if (

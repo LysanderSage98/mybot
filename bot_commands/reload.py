@@ -7,7 +7,7 @@ from . import import_cmds, Result
 async def reload(data: Result):
 	"""reload commands"""
 	if args := data.args:
-		reloaded = import_cmds(args)
+		reloaded = import_cmds(args.values())
 	else:
 		reloaded = import_cmds()
 	await data.message.channel.send(

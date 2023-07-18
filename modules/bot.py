@@ -77,7 +77,8 @@ class Bot(discord.Client):
 
 		@self.event
 		async def on_resumed():
-			self.restarter()
+			pass  # todo
+			# self.restarter()
 
 		@self.event
 		async def on_typing(channel, user, when):
@@ -132,6 +133,9 @@ class Bot(discord.Client):
 			f.__doc__ = data[0].__doc__.split("``````py", 1)[1]
 		except IndexError:
 			pass
+
+		if data[1] == perms.Admin():
+			f.__discord_app_commands_default_permissions__ = discord.Permissions()
 
 		cmd = Command(
 			name = name,

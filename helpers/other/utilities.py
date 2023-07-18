@@ -226,7 +226,7 @@ def reformat(data: dict):
 
 	if choice := res.get("choice"):
 		res.pop("choice")
-		for arg_num, choices in enumerate(choice):
+		for arg_num, choices in reversed(list(enumerate(choice))):
 			_temp = {}
 			_d = ""
 			for _choice in choices:
@@ -242,8 +242,9 @@ def reformat(data: dict):
 					else:
 						_temp[_name][k] = v
 			_temp["choice"] = True
-			res.update({f"arg{arg_num}{':' + _d if _d else ''}": _temp})
-
+			temp_res = {f"arg{arg_num}{':' + _d if _d else ''}": _temp}
+			temp_res.update(res)
+			res = temp_res
 	return res
 
 
@@ -253,9 +254,11 @@ def parse(string, data, open_stack, ret = False, source = ""):
 	it = iter(string)
 	while (char := next(it, None)) is not None:
 		if char in "%'{}|[]()<>:":
-			if char == "'" and source != "details":
-				if open_stack and open_stack[-1] == char:
+			if char == "'":
+				if open_stack and ((has_desc := source == "details") or open_stack[-1] == char):
 					open_stack.pop()
+					if has_desc:
+						open_stack.pop()
 					if literal:
 						return literal
 					else:
@@ -263,6 +266,8 @@ def parse(string, data, open_stack, ret = False, source = ""):
 				else:
 					open_stack.append(char)
 					temp = parse(it, {}, open_stack, source = "literal")
+					if type(temp) == tuple:
+						temp = ":".join(temp)
 					data[temp] = typing.Literal
 
 			elif char == "%":
@@ -457,11 +462,28 @@ async def add_cmd(channel, resp, data, perm, to_add):
 		for key, val in _data.items():
 			if ":" in key:
 				key, key_desc = key.split(":")
+				if " - " in key_desc:
+					key_desc_main, key_desc_rest = key_desc.split(' - ')
+					match = re.search(f": ?{key_desc_rest}", usage)
+					if match:
+						print(match)
+						usage = re.sub(match.group(), "", usage)
+				else:
+					key_desc_main = key_desc
+				match = re.search(f"{key if not 'arg' in key else ''}.?( ?: ?{key_desc_main.strip()})", usage)
+				if match:
+					print(match)
+					usage = re.sub(match.group(1), "", usage)
 			else:
 				key_desc = ""
 			if not val.get("choice"):
 				_type = val["type"]
-				if _type.__base__ == str:
+				if _type == typing.Literal:
+					if is_optional(val):
+						to_put = typing.Optional[val["type"][key]]
+					else:
+						to_put = val["type"][key]
+				elif _type.__base__ == str:
 					if is_optional(val):
 						to_put = typing.Optional[str]
 					else:
@@ -471,11 +493,6 @@ async def add_cmd(channel, resp, data, perm, to_add):
 						to_put = typing.Optional[int]
 					else:
 						to_put = ReprInt
-				elif _type == typing.Literal:
-					if is_optional(val):
-						to_put = typing.Optional[val["type"][key]]
-					else:
-						to_put = val["type"][key]
 				elif _type == Collection:
 					use_coll = True
 					if is_optional(val):
@@ -500,8 +517,8 @@ async def add_cmd(channel, resp, data, perm, to_add):
 						temp[_type] = [_name]
 					else:
 						temp[_type].append(_name)
-				new_data: list = temp.get(typing.Literal) or []
-				if coll := temp.get(Collection):
+				new_data: list = temp.pop(typing.Literal, [])
+				if coll := temp.pop(Collection, None):
 					use_coll = True
 					if optional:
 						new_data.append(None)
@@ -512,11 +529,24 @@ async def add_cmd(channel, resp, data, perm, to_add):
 					to_put = typing.Literal[tuple(new_data)]
 					if optional:
 						to_put = typing.Optional[to_put]
+				if temp:
+					for _type_temp, _elements in temp.items():
+						for _el in _elements:
+							desc += f"{_el}: {_type_temp.__str__()}\n\t"
+							match = re.search(f"{_el}( ?: ?(.*?))[>%]", usage)
+							if match:
+								print(match)
+								desc += f"\t{match.group(2)}\n\t"
+								usage = re.sub(match.group(1), "", usage)
+							_to_put = _type_temp.__str__()
+							if optional:
+								_to_put = typing.Optional[_type_temp.__base__]
+							slash_data[_el] = _to_put
 			desc += f"{key}: {_type.__str__()}\n\t"
 			if key_desc:
-				desc += f"\t{key_desc}\n\t"
+				desc += f"\t{key_desc.strip()}\n\t"
 			slash_data[key] = to_put
-		slash_data = f"slash_args = {slash_data.__str__()}"
+		slash_data = f"slash_args = {slash_data.__str__()}" if slash_data else ""
 		if "typing" not in slash_data:
 			_typing = ""
 	# except RuntimeError as e:
@@ -525,18 +555,14 @@ async def add_cmd(channel, resp, data, perm, to_add):
 	else:
 		slash_data = ""
 
+	to_add["usage"] = usage
+
 	# print(cmd_template)
 	try:
 		if slash_data:
-			if perm:
-				insert = f'"{perm}", '
-			else:
-				insert = f'"", '
+			insert = f'"{perm}", '
 		else:
-			if perm:
-				insert = f'"{perm}"'
-			else:
-				insert = f'""'
+			insert = f'"{perm}"'
 		cmd_template = cmd_template.format(
 			coll = _coll if use_coll else "",
 			typing = _typing,
@@ -559,6 +585,21 @@ async def add_cmd(channel, resp, data, perm, to_add):
 		await channel.send(embed = resp.emb_resp("Command wasn't approved by owner!"))
 
 
+async def reaction(msg: discord.Message, target: discord.Member, bot):
+	await msg.add_reaction("✅")
+	await msg.add_reaction("❌")
+
+	def check(check_reaction, check_user):
+		return check_user == target and msg.id == check_reaction.message.id
+
+	resp_reaction, user = await bot.wait_for('reaction_add', check = check)
+	try:
+		await msg.clear_reactions()
+	except discord.Forbidden:
+		pass
+	return resp_reaction.emoji
+
+
 async def approve(bot, embed: discord.Embed):
 	owner: discord.User = bot.owner
 	dm_c = owner.dm_channel
@@ -566,16 +607,10 @@ async def approve(bot, embed: discord.Embed):
 	if not dm_c:
 		dm_c = await owner.create_dm()
 
+	user = dm_c.recipient
+
 	dm = await dm_c.send(embed = embed)
-	await dm.add_reaction("✅")
-	await dm.add_reaction("❌")
-
-	def check(check_reaction, check_user):
-		# print(f"{dm}\n\n{check_reaction.message}")
-		return check_user == dm_c.recipient and dm.id == check_reaction.message.id
-
-	resp_reaction, user = await bot.wait_for('reaction_add', check = check)
-	return resp_reaction.emoji
+	return await reaction(dm, user, bot)
 
 
 async def approve_alt(bot, cmd_name, cmd_alt):
