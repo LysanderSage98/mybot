@@ -29,7 +29,7 @@ async def help(data: Result):
 	cmds = Permissions.command_list
 
 	if data.args:
-		single = data.args.get(0, data.args.get("command"))
+		single = data.args.get("0", data.args.get("command"))
 		title = f"Help for {Md(single).snippet().bold()}"
 	else:
 		title = "Command overview"

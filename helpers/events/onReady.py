@@ -1,8 +1,22 @@
+import discord
 import re
 
-import discord
-
 from helpers.other import status_rotation, db_stuff as db
+from helpers.other.permissions import Permissions
+
+
+async def try_set_nickname(bot, guild: discord.Guild, prefix):
+	try:
+		match = re.search("\((.)\)$", guild.me.nick)
+		if not match:
+			pass
+		elif match and match.group(1) != prefix:
+			pass
+		else:
+			return
+		await guild.me.edit(nick = f"{bot.user.name} ({prefix})")
+	except discord.Forbidden:
+		pass
 
 
 async def ready_handler(bot):
@@ -25,14 +39,7 @@ async def ready_handler(bot):
 		}, upsert = True)
 		setting = coll2.find_one({"guild": guild.id})
 		prefix = bot.prefix
-		try:
-			match = re.search("\((.)\)", guild.me.nick)
-			if prefix not in guild.me.nick and not match:
-				await guild.me.edit(nick = f"{guild.me.nick} ({prefix})")
-			elif match and match.group(1) != prefix:
-				await guild.me.edit(nick = re.sub(re.escape(match.group(1)), prefix, guild.me.nick))
-		except discord.Forbidden:
-			pass
+
 		if setting:
 			guild_settings = setting.get("guild_settings")
 			if guild_settings:
@@ -47,6 +54,7 @@ async def ready_handler(bot):
 							}
 						}
 					)
+					prefix = bot.prefix
 			else:
 				coll2.update_one(
 					{
@@ -66,5 +74,6 @@ async def ready_handler(bot):
 					}
 				}
 			)
+		await try_set_nickname(bot, guild, prefix)
 	changer = status_rotation.StatusRotation(bot)
 	return changer

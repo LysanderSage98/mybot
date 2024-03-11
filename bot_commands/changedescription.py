@@ -2,6 +2,7 @@ import discord
 
 from helpers.other.permissions import Permissions, db
 from helpers.other.collections import Collection
+from . import Result
 
 
 @Permissions.register_command(
@@ -11,7 +12,7 @@ from helpers.other.collections import Collection
 		"new_desc": str
 	}
 )
-async def changedescription(data):
+async def changedescription(data: Result):
 	"""Suggest description change of a command to owner.
 	``````py
 	command: str
@@ -19,5 +20,6 @@ async def changedescription(data):
 	new_desc: str
 		new description
 	"""
+	print(data)
 	raise RuntimeError("Not implemented yet!")  # TODO implement command 'changedescription'
 

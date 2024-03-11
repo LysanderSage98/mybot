@@ -20,10 +20,11 @@ class Datatypes:
 	int8 = bigint
 	integer = int
 	numeric = decimal
+	str = "TEXT"
 	# serial = bigserial
 	smallint = int2
 	# smallserial = bigserial
-	text = "TEXT"
+	text = str
 	time = "TIME"
 	timestamp = "TIMESTAMP"
 	varbit = bit
@@ -99,6 +100,10 @@ class Table:
 	def _add_datatype(self, name, datatype, primary_key):
 		if name.startswith("_"):
 			raise NameError("Name may not start with underscore")
+		elif ":" in name:
+			temp = name.split(":")
+			name = temp[0]
+			datatype = (datatype, temp[1])
 		if primary_key:
 			datatype += " PRIMARY KEY"
 		self._columns[name] = datatype
@@ -288,8 +293,10 @@ class Table:
 		else:
 			append = ""
 		out = f"CREATE TABLE {self._name} (" + append
-		for item in items:
-			out += f"{item[0]} {item[1]}, " + append
+		for name, _type in items:
+			if type(_type) == tuple:
+				_type, name = _type
+			out += f"{name} {_type}, " + append
 		for foreign_key in self._foreign_keys:
 			for ref in self._foreign_keys[foreign_key]:
 				out += f"FOREIGN KEY ({foreign_key}) REFERENCES {ref}, " + append

@@ -23,7 +23,7 @@ async def setprefix(data: Result):
 		else:
 			embed = data.bot.responder.emb_resp2("No guild settings found!")
 	else:
-		if args.get("arg0", args.get(0, None)) == "reset":
+		if args.get("arg0", args.get("0", None)) == "reset":
 			prefix = json.loads(open("data/info.json", "r").read())["prefix"]
 			coll.find_one_and_update(
 				{"guild": data.message.guild.id},
@@ -35,7 +35,7 @@ async def setprefix(data: Result):
 			)
 			embed = data.bot.responder.emb_resp("Reset prefix!", color = "ok")
 		else:
-			prefix = args.get("prefix", args.get(0))
+			prefix = args.get("prefix", args.get("0"))
 			coll.find_one_and_update(
 				{"guild": data.message.guild.id},
 				{
@@ -46,7 +46,7 @@ async def setprefix(data: Result):
 			)
 			embed = data.bot.responder.emb_resp("New prefix set!", color = "success")
 		await data.message.guild.me.edit(
-			nick = data.bot.user.name + f"({prefix})"
+			nick = data.bot.user.name + f" ({prefix})"
 		)
 
 	# raise RuntimeError("Not implemented yet!")  # TODO implement command 'setprefix'

@@ -43,6 +43,18 @@ from . import make_sql as sql
 # class Guilds(Data):
 # 	pass
 
+DATABASE = "data/MyBot.db"
+
+ARRAY_OPS = [
+	"$",
+	"S[]",
+	"$addToSet",
+	"$pop",
+	"$pull",
+	"$push",
+	"pullAll"
+]
+
 
 class ThreadCon:
 	threads = {}
@@ -65,7 +77,7 @@ def update_connection() -> ThreadCon:
 	if thread_con := ThreadCon.get_con(thread := threading.current_thread()):
 		return thread_con
 	else:
-		con = sqlite3.connect("data/MyBot.db")
+		con = sqlite3.connect(DATABASE)
 		con.row_factory = sqlite3.Row
 		cur = con.cursor()
 		return ThreadCon(thread, con, cur)
@@ -188,11 +200,11 @@ class Table(sql.Table):
 					# print("recreating table", column)
 					table.put_int("id_", True)
 					table.rec_table(thread_con, sub_data)
-					# print(table)
+				# print(table)
 				else:
 					pass
-					# print(table)
-					# thread_con.cur.execute(str(table))
+				# print(table)
+				# thread_con.cur.execute(str(table))
 				self.put_int(column)
 				self.set_foreign_key(column, f"{column}(id_)")
 			elif type(value) == list:
@@ -204,8 +216,7 @@ class Table(sql.Table):
 				self.put_int(column)
 				self.set_foreign_key(column, f"{column}(id_)")
 			else:
-				getattr(self, func(value))(column)  # , set_primary)
-				# set_primary = False
+				getattr(self, func(value))(column)
 		# SQL.get_instance().update_tables()
 		try:
 			thread_con.cur.execute(str(self))
@@ -219,7 +230,7 @@ class Table(sql.Table):
 		# print("="*50 + f"\nupdate {self._name} with {data}\n" + "="*50)
 		thread_con.cur.execute(f"PRAGMA table_info({self._name})")
 		existing = [row[1] for row in thread_con.cur.fetchall()]
-		ref = list(filter(lambda x: x[0] in existing, data))
+		# ref = list(filter(lambda x: x[0] in existing, data))
 		new_data = list(filter(lambda x: x[0] not in existing, data))
 		# print("existing", existing)
 		# print("ref", ref)
@@ -227,9 +238,9 @@ class Table(sql.Table):
 		for column, value in new_data:
 			# print("column&value", column, value)
 			if type(value) == dict:
-				table: Table = SQL.get_instance().get_collection(column)
+				SQL.get_instance().get_collection(column)
 				# print(table)
-				ret = table.insert_one(value)
+				# ret = table.insert_one(value)
 				stmt = f"ALTER TABLE {self._name} ADD {column} {sql.Datatypes.bigint} REFERENCES {column}(id_);"
 				# print(stmt)
 				thread_con.cur.execute(stmt)
@@ -266,124 +277,178 @@ class Table(sql.Table):
 			else:
 				raise e
 
+	@classmethod
+	def fix_list(cls, data: list, info):
+
+		if data:
+			base = type(data[0])
+			for el in data[:]:
+				if type(el) != base:
+					idx = data.index(el)
+					temp = data.pop(idx)
+					if base == dict:
+						val = {"__SINGLE_ELEMENT__": temp}
+					elif base == list:
+						val = ["__SINGLE_ELEMENT__", temp]
+					else:
+						val = temp
+					data.insert(idx, val)
+
+		new_data = {}
+		for idx, el in enumerate(data):
+			if type(el) == dict:
+				new_data[f"EL_{idx}"] = cls.fix_dict(el, info)
+				if data[idx].get("REFS_") is None:
+					new_data[f"EL_{idx}"]["REFS_"] = 0
+			elif type(el) == list:
+				new_data[f"EL_{idx}"] = cls.fix_list(el, info)
+			elif el is None:
+				new_data[f"EL_{idx}"] = "None"
+			else:
+				new_data[f"EL_{idx}"] = el
+		return new_data
+
+	@classmethod
+	def fix_dict(cls, data: dict, info, extra = None):
+		for key, val in list(data.items()):
+			# if key == "id_":
+			# 	raise RuntimeError("Using 'id_' as key will drop and recreate the currently used table!!")
+			if key.startswith("$"):
+				temp = data.pop(key)
+				if key in ARRAY_OPS:
+					for old_key in list(temp.keys()):
+						new_key = old_key if "_LIST" in old_key else f"{old_key}_LIST"
+						temp[new_key] = temp.pop(old_key)
+				info[key] = list(temp.keys())
+				data.update(temp)
+			elif "." in key:
+				temp = key.split(".", 1)
+				data[temp[0]] = {temp[1]: data.pop(key)}
+		# print(data)
+
+		for key, val in list(data.items()):
+			# if key == "id_":
+			# 	raise RuntimeError("Using 'id_' as key will drop and recreate the currently used table!!")
+			if type(val) == dict:
+				res = cls.fix_dict(val, info)
+			elif type(val) == list:
+				if "_LIST" not in key:
+					data.pop(key)
+					for k, lis in info.items():
+						if key in lis:
+							info[k][info[k].index(key)] = key + "_LIST"
+					key = key + "_LIST"
+					res = cls.fix_list(val, info)
+				else:
+					res = val
+			elif val is None and key != "id_":
+				data[key] = "None"
+				continue
+			else:
+				continue
+			data[key] = res
+			if data[key].get("REFS_") is None:
+				data[key]["REFS_"] = 0
+		return data
+
 	@staticmethod
 	def fix_data(func):
 		"""
 		Walk data to turn lists in dicts or json
 		"""
 
-		def fix_list(data: list, info):
-
-			if data:
-				base = type(data[0])
-				for el in data[:]:
-					if type(el) != base:
-						idx = data.index(el)
-						temp = data.pop(idx)
-						if base == dict:
-							val = {"__SINGLE_ELEMENT__": temp}
-						elif base == list:
-							val = ["__SINGLE_ELEMENT__", temp]
-						else:
-							val = temp
-						data.insert(idx, val)
-
-			if data and (type(data[0]) == dict):
-				# res = []
-				res = dict(map(lambda x: ("EL_" + str(x[0]), fix_dict(x[1], info)), enumerate(data)))
-				# for el in data:
-				# 	res.append(fix_dict(el, info))
-			elif data and (type(data[0]) == list):
-				res = dict(map(lambda x: ("EL_" + str(x[0]), fix_list(x[1], info)), enumerate(data)))
-			else:
-				res = json.dumps(data, ensure_ascii = False)
-			return res
-
-		def fix_dict(data: dict, info):
-			for key, val in list(data.items()):
-				if key == "id_":
-					raise RuntimeError("Using 'id_' as key will drop and recreate the currently used table!!")
-				elif key.startswith("$"):
-					temp = data.pop(key)
-					info[key.strip("$").upper()] = list(temp.keys())
-					data.update(temp)
-			# print(data)
-
-			for key, val in list(data.items()):
-				if key == "id_":
-					raise RuntimeError("Using 'id_' as key will drop and recreate the currently used table!!")
-				elif type(val) == dict:
-					res = fix_dict(val, info)
-				elif type(val) == list:
-					if "_LIST" not in key:
-						data.pop(key)
-						for k, lis in info.items():
-							if key in lis:
-								info[k][info[k].index(key)] = key + "_LIST"
-						key = key + "_LIST"
-						res = fix_list(val, info)
-					else:
-						res = val
-				else:
-					continue
-				data[key] = res
-			return data
-
 		def wrapper(*args, **kwargs):
-			data = args[-1]
-			info: dict[str, list] = {}
-			key: str
+			info: dict[str, list] = kwargs.get("info", {})
 			# print(update)
-			fix_dict(data, info)
-			if kwargs:
+			for el in args:
+				if type(el) == dict:
+					Table.fix_dict(el, info)
+			# if kwargs:
+			if info:
 				kwargs.update({"info": info})
 			return func(*args, **kwargs)
 		return wrapper
 
+	@classmethod
+	def normalize(cls, data: dict, ref: dict = None):
+
+		def fix_dict(_data, temp, key):
+			temp.pop("REFS_")
+			walk(temp, temp)
+			if "_LIST" in key:
+				_data.pop(key)
+				key = key.strip("_LIST")
+				temp = list(temp.values())
+			_data[key] = temp
+
+		def walk(_data, _ref):
+			for key, val in list(_data.items()):
+				if _data.get(key) is None:
+					_data.pop(key)
+				elif val != (temp := _ref.get(key)):
+					if type(temp) == dict:
+						fix_dict(_data, temp, key)
+				elif type(val) == dict:
+					fix_dict(_data, val, key)
+
+		walk(data, ref)
+
+	@fix_data
 	def update(
 		self,
-		where: list[tuple[str, Union[str, int]]],
+		where: dict,
 		data: dict,
 		info: dict[str, list[str]],
 		upsert = False
 	):
 		thread_con = update_connection()
-		keys = list(data.keys())
+		# keys = list(data.keys())
 		# print(keys)
-		where = list(zip(*where))
-		where_stmt = f"WHERE {'=? and '.join(where[0])}=?"
+		where = list(zip(*where.items()))
+		where_stmt = f"WHERE {'=? and '.join(where[0])}=?" if where else ""
 		find = f"SELECT * FROM {self._name} {where_stmt};"
 		# print(find)
 		# raise RuntimeError("test done")
-		thread_con.cur.execute(find, where[1])
+		thread_con.cur.execute(find, where[1] if where else [])
 		res = thread_con.cur.fetchone()
 		if not res:
 			if not upsert:
 				raise LookupError(f"Can't update {self._name} as no entry matching '{where_stmt}' with {where[1]} could be found!")
 			else:
 				return self.insert_one(data)
-		to_set = "=?,".join(info['SET']) + "=?"
+		else:
+			res = dict(res)
+		to_set = "=?,".join(info['$set']) + "=?" if info.get("$set") else ""
 
-		for el in info.get("SETONINSERT") or []:
+		for el in info.get("$setOnInsert") or []:
 			data.pop(el)
-		stmt = f"UPDATE {self._name} SET {to_set} {where_stmt}"
-		# print("prepare", stmt)
-		values = []
-		update = []
-		for key, value in data.items():
-			if type(value) == dict:
-				table: Table = SQL.get_instance().get_collection(key)
-				to_append = table.find_one(value)["id_"]
-			elif type(value) == list:
-				raise RuntimeError(value)
-			else:
-				to_append = value
-			if key not in where:
-				update.append(to_append)
-		update.extend(where[1])
-		# print("statement & values", stmt, [*values, *update])
-		ret = thread_con.cur.execute(stmt, [*values, *update])
-		thread_con.commit()
+		if to_set:
+			stmt = f"UPDATE {self._name} SET {to_set} {where_stmt}"
+			# print("prepare", stmt)
+			values = []
+			update = []
+			for key, value in data.items():
+				if type(value) == dict:
+					table: Table = SQL.get_instance().get_collection(key)
+					temp = table.find_one(value)
+					if not temp:
+						value.pop("REFS_")
+						table.update_one({"rowid": res.get(key)}, {"$set": value}, upsert = True)
+						to_append = res.get(key)
+					else:
+						to_append = temp.get(key)
+				elif type(value) == list:
+					raise RuntimeError(value)
+				else:
+					to_append = value
+				if key not in where:
+					update.append(to_append)
+			update.extend(where[1])
+			# print("statement & values", stmt, [*values, *update])
+			ret = thread_con.cur.execute(stmt, [*values, *update])
+			thread_con.commit()
+		else:
+			print("xxxxxxxxx")
 		return ret
 
 	@fix_data
@@ -399,9 +464,10 @@ class Table(sql.Table):
 		data = [*_filter.items(), *_update.items()]
 		stmt = f"SELECT {','.join(set(list(zip(*data))[0]))} FROM {self._name};"
 		self.check_and_fix_integrity(thread_con, stmt, data, upsert)
-		self.update(list(_filter.items()), _update, info, upsert)
+		self.update(_filter, _update, info = info, upsert = upsert)
 		return self
 
+	@fix_data
 	def insert(self, data: dict) -> int:
 		thread_con = update_connection()
 		stmt = f"INSERT INTO {self._name}({','.join(data.keys())}) VALUES({','.join(['?'] * len(data))});"
@@ -413,6 +479,7 @@ class Table(sql.Table):
 					res = table.insert_one(val)
 				else:
 					res = check["id_"]
+				table.inc_refs({"id_": res})
 			elif type(val) == list:
 				table = SQL.get_instance().tables[key]
 				values = dict(map(lambda x: ("EL_" + str(x[0]), x[1]), enumerate(val)))
@@ -438,12 +505,24 @@ class Table(sql.Table):
 		self.check_and_fix_integrity(thread_con, stmt, data)
 		return self.insert(to_insert)
 
+	@fix_data
 	def find(
 		self,
 		_filter: dict = None,
 		_projection: dict = None,
-		limit: int = None
+		limit: int = None,
+		_info: dict = None
 	):
+		if not _filter:
+			_filter = {}
+			clear_refs = True
+		else:
+			clear_refs = False
+		if _filter.get("REFS_") is not None:
+			_filter = _filter.copy()
+			_filter.pop("REFS_")
+			if not _filter:
+				return []
 		thread_con = update_connection()
 		# print("="*50 + f"\ntrying to find {_filter} in {self._name}\n" + "="*50)
 		if not _filter:
@@ -458,7 +537,12 @@ class Table(sql.Table):
 					table = SQL.get_instance().tables[key]
 					val = table.find_one(val, {"id_": True})
 					val = val["id_"] if val else ''
-				search[key] = val
+				if val is not None:
+					search[key] = val
+				else:
+					pass
+			if not search:
+				return []
 			orig_data = list(_filter.items())
 			data = list(search.items())
 			stmt = f"SELECT * from {self._name} WHERE " \
@@ -466,18 +550,22 @@ class Table(sql.Table):
 			self.check_and_fix_integrity(thread_con, stmt, orig_data)
 			temp = thread_con.cur.fetchall()
 			results = [dict(r) for r in temp][:limit]
-			# print("results of find", results)
-
-			if results and (temp := list(filter(lambda x: any(y in x for y in self._foreign_keys), results))):
-				for temp_res in temp:
-					# print(temp_res)
-					for key, val in temp_res.items():
-						table: Table = SQL.get_instance().tables.get(key)
-						if table:
-							res = table.find_one({"id_": val}, _projection)
+		# print("results of find", results)
+		if clear_refs:
+			results = list(filter(lambda x: not x.get("REFS_"), results))
+		if results and (temp := list(filter(lambda x: any(y in x for y in self._foreign_keys), results))):
+			for temp_res in temp:
+				# print(temp_res)
+				for key, val in temp_res.items():
+					table: Table = SQL.get_instance().tables.get(key)
+					if table:
+						res = table.find_one({"id_": val}, _projection)
+						if res:
 							res.pop("id_")
-							for result in results:
-								result[key] = res
+							if res.get("REFS_"):
+								res.pop("REFS_")
+						# for result in results:
+						temp_res[key] = res or val
 				# print("results of find after adapting dict", results)
 		for result in results:
 			if _projection:
@@ -485,29 +573,107 @@ class Table(sql.Table):
 				for key in temp:
 					result.pop(key)
 			for key, val in list(result.items()):
-				if "_LIST" in key:
+				if result[key] is None:
 					result.pop(key)
-					key = key.strip("_LIST")
+				elif "_LIST" in key:
+					result.pop(key)
 					if type(val) == dict:
 						if test := val.get("__SINGLE_ELEMENT__"):
 							val = test
+						else:
+							val = list(val.values())
 					elif type(val) == list:
 						if val[0] == "__SINGLE_ELEMENT__":
 							val = val[1]
 					else:
-						val = json.loads(val)
+						try:
+							val = list(val.values())
+						except AttributeError:
+							result[key] = val
+							val = []
+					key = key.strip("_LIST")
 					result[key] = val
+				elif val == "None":
+					result[key] = None
 
 		# print("results after projection applied", results)
 		return results
 
+	@fix_data
 	def find_one(
 		self,
 		_filter: dict = None,
-		_projection: dict = None
+		_projection: dict = None,
+		_info: dict = None
 	):
-		ret = self.find(_filter, _projection, 1)
+		ret = self.find(_filter, _projection, 1, _info = _info)
 		return ret[0] if ret else None
+
+	def inc_refs(self, _filter):
+		thread_con = update_connection()
+		where = list(zip(*_filter.items()))
+		where_stmt = f"WHERE {'=? and '.join(where[0])}=?" if where else ""
+		stmt = f"UPDATE {self._name} SET REFS_=REFS_+1 {where_stmt}"
+		thread_con.cur.execute(stmt, where[1])
+
+	def dec_refs(self, _filter):
+		if _filter.get("REFS_") is not None:
+			_filter.pop("REFS_")
+		thread_con = update_connection()
+		where = list(zip(*_filter.items()))
+		where_stmt = f"WHERE {'=? and '.join(where[0])}=?" if where else ""
+		stmt = f"UPDATE {self._name} SET REFS_=REFS_-1 {where_stmt} RETURNING *"
+		ret = thread_con.cur.execute(stmt, where[1])
+		temp = dict(next(ret))
+		if not temp["REFS_"]:
+			self.delete(_filter)
+
+	def delete(
+		self,
+		_filter: dict
+	):
+		orig_filter = _filter.copy()
+		_filter = self.fix_dict(_filter, {})
+		thread_con = update_connection()
+		stmt = f"DELETE FROM {self._name} WHERE {'=? and '.join(_filter.keys())}=? RETURNING *;"
+		values = []
+		for key, val in _filter.items():
+			if type(val) == dict:
+				table: Table = SQL.get_instance().get_collection(key)
+				if table:
+					temp = table.find_one(val)
+					if temp:
+						val = temp["id_"]
+						table.dec_refs({"id_": val})
+					else:
+						val = orig_filter[key]
+						table.dec_refs({"id_": val})
+				else:
+					raise RuntimeError("Why are we here?!")
+			elif type(val) == list:
+				table: Table = SQL.get_instance().get_collection(key)
+				if table:
+					table.dec_refs({"id_": val})
+				else:
+					raise RuntimeError("Why are we here?!")
+				values.append(val)
+			# elif type(val) == str:
+			# 	val = f"'{val}'"
+			values.append(val)
+		ret = thread_con.cur.execute(stmt, values)
+		to_return = dict(next(ret))
+		thread_con.commit()
+		return to_return
+
+	@fix_data
+	def delete_one(
+		self,
+		_filter: dict
+	):
+		new_filter = self.find_one(_filter)
+		ret = self.delete(new_filter)
+		Table.normalize(ret, new_filter)
+		return ret
 
 
 class SQL:

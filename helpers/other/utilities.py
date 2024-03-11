@@ -161,9 +161,9 @@ class Markdown(str):
 		return self.s
 
 
-def to_yt_url(string):
-	if string:
-		return "https://www.youtube.com/watch?v=" + string
+def to_yt_url(kind, string):
+	url = {"v": "watch", "list": "playlist"}
+	return f"https://www.youtube.com/{url[kind]}?{kind}={string}"
 
 
 def reformat(data: dict):
@@ -568,6 +568,7 @@ async def add_cmd(channel, resp, data, perm, to_add):
 			typing = _typing,
 			perm = insert,
 			slash = slash_data,
+			to_send = _to_send,
 			cmd = data.command,
 			desc = desc,
 		)

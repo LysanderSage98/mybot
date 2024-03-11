@@ -2,8 +2,12 @@ import discord
 {typing}
 from helpers.other.permissions import Permissions, db
 {coll}
+from . import Result
 
 @Permissions.register_command({perm}{slash})
-async def {cmd}(data):
+async def {cmd}(data: Result):
 	"""{desc}"""
-	raise RuntimeError("Not implemented yet!")  # TODO implement command '{cmd}'
+	raise RuntimeError("__**Not implemented yet!**__")  # TODO implement command '{cmd}'
+
+	to_send = {to_send}
+	return data, to_send

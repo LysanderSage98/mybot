@@ -13,6 +13,7 @@ import helpers.other.responder as r
 from discord.app_commands import CommandTree, Command
 from types import FunctionType
 from typing import Coroutine, Any
+from modules.music import MusicManager
 
 
 class Bot(discord.Client):
@@ -22,7 +23,7 @@ class Bot(discord.Client):
 		self.restarter = func
 		self.started = 0
 		self.gui = gui
-		self.music_player = music
+		self.music: MusicManager = music
 		self.responder: r.Responder = responder
 		self.status_changer = None
 		self.owner = None

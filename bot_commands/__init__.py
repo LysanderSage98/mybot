@@ -1,11 +1,19 @@
-import typing
-
 import discord
+import googleapiclient.discovery
+import helpers.other.permissions
+import helpers.other.utilities
 import importlib
+import json
 import os
 import sys
+import types
+import typing
 
-import helpers.other.permissions
+api_info = json.loads(open("data/info.json", "r").read())["api_info"]
+
+
+music_instances = {}
+youtube = googleapiclient.discovery.build(api_info[0], api_info[1], developerKey = api_info[2])
 
 
 class Result:
@@ -65,7 +73,14 @@ def import_cmds(cmds: list = None):
 			module = importlib.import_module("." + command, package = "bot_commands")
 			imported[module.__name__.split(".")[-1]] = module
 		else:
-			importlib.reload(imported[command])
+			module = importlib.reload(imported[command])
+			music_commands = module.__dict__.get("MusicCommands")
+			if music_commands:
+				for key, val in music_commands.__dict__.items():
+					# print(key, val)
+					if callable(val):
+						for instance in music_instances.values():
+							setattr(instance, key, types.MethodType(val, instance))
 		print("imported command: ", command)
 	return commands
 

@@ -251,7 +251,7 @@ class Permissions:
 				func = commands.get(cmd.get("name")) if cmd else None
 			result = self.__class__.result_object(bot, message)
 			result.command = command_args[0]
-			result.args = {x: y for x, y in enumerate(command_args[1:])}
+			result.args = {str(x): y for x, y in enumerate(command_args[1:])}
 			result.prefix = prefix
 			if func:
 				print("func data in permissions.check:", func)

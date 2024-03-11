@@ -23,7 +23,7 @@ from modules import bot, music, gui
 
 class Holder:
 	def __init__(self, responder_class, _bot = None, _music = None, _gui = None):
-		self.music: music.CreateDownloader = _music
+		self.music: music.MusicManager = _music
 		self.gui = _gui
 		self.bot: bot.Bot = _bot(self.reload, responder_class, self.gui, self.music, intents = discord.Intents.all())
 		self.threads = {}
@@ -33,7 +33,7 @@ class Holder:
 			thread.start()
 			if self.music:
 				# noinspection PyTypeChecker
-				thread = threading.Thread(target = self.music, args = [responder_class])
+				thread = threading.Thread(target = self.music)
 				self.threads["music_thread"] = thread
 				thread.start()
 			if self.gui:
@@ -51,8 +51,8 @@ class Holder:
 
 	def reload(self):
 		if self.music:
-			print("stop music")
-			self.music.queue.put(None)
+			# print("stop music")
+			# await self.music.stop(full = True)
 			# noinspection PyTypeChecker
 			self.threads["music_thread"] = threading.Thread(target = self.music)
 			self.threads["music_thread"].start()
@@ -65,4 +65,4 @@ class Holder:
 
 if __name__ == '__main__':
 	print("Starting")
-	runner = Holder(responder.Responder(), bot.Bot, music.CreateDownloader, None)
+	runner = Holder(responder.Responder(), bot.Bot, music.MusicManager, None)
