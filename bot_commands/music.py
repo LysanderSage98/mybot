@@ -541,9 +541,9 @@ class MusicCommands:
 		"playlist": typing.Optional[typing.Literal['playlist']],
 		"skip": typing.Optional[int],
 		"loop": typing.Optional[str],
-		"from": typing.Optional[int],
+		"src": typing.Optional[int],
 		"to": typing.Optional[int],
-		"stored": typing.Optional[typing.Literal['stored']],
+		"stored": typing.Optional[typing.Literal['sdstred']],
 		"search": typing.Optional[str]
 	}
 )
@@ -558,9 +558,9 @@ async def music(data: Result):
 		amount of songs to skip - only used with skip functionality
 	loop: str
 		loop setting - only used with loop functionality
-	from: int
+	src: int
 		current song position - only used with move functionality
-	to: int
+	dst: int
 		target song position - only used with move functionality
 	stored: typing.Literal
 		do not search for playlist name on youtube, use a saved one in the bot - only used with play functionality
