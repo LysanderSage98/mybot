@@ -46,7 +46,7 @@ class Bot(discord.Client):
 
 		@self.event
 		async def on_guild_join(guild):
-			events.onGuildCUD.guild_handler(guild)
+			events.onGuildCUD.guild_join_handler(self, guild)
 
 		@self.event
 		async def on_message(message):
@@ -87,7 +87,6 @@ class Bot(discord.Client):
 
 		@self.event
 		async def on_user_update(before, after):
-	
 			dm_c = self.owner.dm_channel
 			
 			if not dm_c:
@@ -95,7 +94,13 @@ class Bot(discord.Client):
 			x = before.name
 			y = after.name
 			if x != y:
-				await dm_c.send(f"old: {x}\n\nnew: {(y, after.id)}")
+				msg = f"old: {x}\n\nnew: {(y, after.id)}"
+				try:
+					common_guilds = [guild.name for guild in self.guilds if before in guild.members]
+					msg += f"\n{common_guilds}"
+				except Exception as e:
+					print(e)
+				await dm_c.send(msg)
 			else:
 				print("Other changes at", x, "'s profile.")
 
@@ -117,11 +122,15 @@ class Bot(discord.Client):
 		name: str,
 		data: tuple[Coroutine, perms.PermHierarchy, dict[str, Any]],
 		guild: discord.Guild = None):
-		new = self._interaction_handler[1].replace(
+		code = self._interaction_handler[1]
+		num = 1 + len(data[2])
+		new = code.replace(
 			co_name = name,
+			co_qualname = name,
 			co_argcount = 1,
 			co_kwonlyargcount = len(data[2]),
 			co_varnames = ("interaction", *data[2].keys()),
+			co_nlocals = num
 		)
 		f = FunctionType(
 			new,
@@ -144,9 +153,10 @@ class Bot(discord.Client):
 			callback = f
 		)
 		cmd._callback = self._interaction_handler[0]
+		# noinspection PyTypeChecker
 		self.cmd_tree.add_command(cmd, override = True, guild = guild)
 
 	def run(self, *args, **kwargs):
-		token = json.load(open("data/info.json", "r"))["token2"]
+		token = json.load(open("data/info.json", "r"))["token1"]
 		print("bot started")
 		super().run(token, *args, **kwargs)

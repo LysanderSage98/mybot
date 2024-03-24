@@ -1,10 +1,10 @@
 import datetime
-import discord
-
 
 from helpers.other.permissions import Permissions, PermHierarchy
-from helpers.other.collections import Collection
+from helpers.other.bot_collections import Collection
 from . import Result
+
+from helpers.other import utilities as u
 
 
 @Permissions.register_command(
@@ -57,7 +57,7 @@ async def help(data: Result):
 			inline = False)
 		embed.add_field(
 			name = "Usage",
-			value = Md.cb(usage.format(prefix = data.prefix)),
+			value = Md.cb(u.Format().format(usage, prefix = data.prefix)),
 			inline = False)
 		embed.add_field(
 			name = "Usage example",
@@ -75,7 +75,8 @@ async def help(data: Result):
 		out += "```"
 		embed.description = out
 
-	embed.set_footer(text = f"You might want to do {data.prefix}help help to get a better understanding of the command usage")
+	embed.set_footer(
+		text = f"You might want to do {data.prefix}help help to get a better understanding of the command usage")
 
 	to_send = {
 		"embed": embed

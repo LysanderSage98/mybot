@@ -3,7 +3,7 @@ import discord
 import typing
 
 from . import db_stuff as db
-from .collections import Collection
+from .bot_collections import Collection
 
 
 def normalize_types(func):
@@ -127,8 +127,8 @@ Collection("commands", commands)
 
 
 class Permissions:
-	settings: db.database.Collection = db.db.get_collection(name = "Settings")
-	command_list: db.database.Collection = db.db.get_collection(name = "Commands")
+	settings: db.pymongo.database.Collection = db.db.get_collection(name = "Settings")
+	command_list: db.pymongo.database.Collection = db.db.get_collection(name = "Commands")
 	
 	def __init__(self, result_object = None):
 		if result_object:
@@ -156,7 +156,7 @@ class Permissions:
 							"id": 435104102599360522,
 							"name": "lysandersage98"
 						},
-						"added_on": datetime.datetime.utcnow().timestamp(),
+						"added_on": datetime.datetime.now(datetime.UTC).timestamp(),
 					}
 				}, upsert = True
 			)

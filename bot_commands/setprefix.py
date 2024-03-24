@@ -1,4 +1,3 @@
-import discord
 import json
 import typing
 
@@ -6,7 +5,9 @@ from helpers.other.permissions import Permissions, db
 from . import Result
 
 
-@Permissions.register_command("admin", slash_args = {"prefix": typing.Optional[str], "arg0": typing.Optional[typing.Literal['reset']]})
+@Permissions.register_command("admin", slash_args = {
+	"prefix": typing.Optional[str],
+	"arg0": typing.Optional[typing.Literal['reset']]})
 async def setprefix(data: Result):
 	"""set new prefix for server
 	``````py

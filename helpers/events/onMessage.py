@@ -13,12 +13,12 @@ async def message_handler(message: discord.Message, bot):
 	print("message handler result\n", result)
 	if result:
 		temp = await do_stuff(result)
-		if type(temp) == tuple:
+		if isinstance(temp, tuple):
 			res, info = temp
 			await message.channel.send(**info)
 		else:
 			res = temp
-		if type(res) != Result or result.error:
+		if not isinstance(res, Result) or result.error:
 			return res
 
 
@@ -32,12 +32,12 @@ async def interaction_handler(interaction: discord.Interaction, **params):
 		try:
 			temp = await do_stuff(result)
 			print("after command execution\n", result)
-			if type(temp) == tuple:
+			if isinstance(temp, tuple):
 				res, info = temp
 				await interaction.followup.send(**info)
 			else:
 				res = temp
-			if type(res) != Result or result.error:
+			if not isinstance(res, Result) or result.error:
 				await interaction.followup.send(res)
 		except Exception as e:
 			txt = f"{repr(e)}\n{traceback.format_tb(e.__traceback__)[-1]}"

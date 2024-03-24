@@ -27,7 +27,7 @@ class Result:
 		self.message: discord.Message = message
 		self.command: str
 		self.function: typing.Coroutine
-		self.args: list
+		self.args: dict
 		self.error: str
 		self.user: tuple[discord.User, helpers.other.permissions.PermHierarchy]
 		self.prefix: str

@@ -3,7 +3,10 @@ import typing
 from helpers.other.permissions import Permissions
 from . import Result
 
-@Permissions.register_command("", slash_args = {"arg0": typing.Optional[typing.Literal['-hex', '-oct']], "some_text": str})
+
+@Permissions.register_command("", slash_args = {
+	"arg0": typing.Optional[typing.Literal['-hex', '-oct']],
+	"some_text": str})
 async def binaryconverter(data: Result):
 	"""Convert text from or to binary, octal or hexadecimal format.
 	``````py

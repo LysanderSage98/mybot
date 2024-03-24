@@ -92,7 +92,7 @@ class Gui(tk.Tk):
 				self.after(10, self.quit)
 				break
 			
-			elif type(self.obj[0]) == discord.Message:
+			elif isinstance(self.obj[0], discord.Message):
 				if self.obj[0].author.id not in self.authors:
 					self.count += 1
 					self.authors.append(self.obj[0].author.id)
@@ -104,12 +104,12 @@ class Gui(tk.Tk):
 					obj = self.obj.pop(0)
 					self.children[str(obj.author.id)].add(obj.content)
 			
-			elif type(self.obj[0]) == dict:
+			elif isinstance(self.obj[0], dict):
 				obj = self.obj.pop(0)
 				print(obj)
 				self.loop.create_task(dm_send(obj))
 			
-			elif type(self.obj[0]) == tuple:
+			elif isinstance(self.obj[0], tuple):
 				obj = self.obj.pop(0)
 				# print(obj)
 				if obj[0] == "MSG":

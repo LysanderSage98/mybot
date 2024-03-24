@@ -30,7 +30,7 @@ class Responder:
             description = desc,
             url = url,
             color = color,
-            timestamp = datetime.datetime.utcnow()
+            timestamp = datetime.datetime.now(datetime.UTC)
         )
 
     def emb_resp2(self, msg: str) -> discord.Embed:

@@ -13,7 +13,7 @@ class _GetItem:
 		return temp
 
 	def __getitem__(self, item):
-		if type(item) == tuple:
+		if isinstance(item, tuple):
 			name = item[0]
 			temp: CollectionAccess = self._getitem.get_coll(name)
 			temp.set_other(other_args = item[1:])
@@ -50,6 +50,7 @@ class CollectionAccess:
 			else:
 				self._checked_orig = True
 		elif item == "__args__" and self._other and self._checked_orig:
+			# noinspection PyTypeHints
 			temp = [typing.Literal[tuple(super().__getattribute__(item))], type(None)]
 			return temp
 		return super().__getattribute__(item)
@@ -66,14 +67,14 @@ class CollectionAccess:
 	def __args__(self):
 		temp = []
 		for key, val in self.data.items():
-			if type(val) == tuple and len(val) >= 2:  # should only be important for command list
+			if isinstance(val, tuple) and len(val) >= 2:  # should only be important for command list
 				if not val[1]:
 					temp.append(key)
 			else:
 				temp.append(key)
 		if self._other_args:
 			for arg in self._other_args:
-				if type(arg) == CollectionAccess:
+				if isinstance(arg, CollectionAccess):
 					temp.extend(arg.__args__)
 				else:
 					temp.append(arg)

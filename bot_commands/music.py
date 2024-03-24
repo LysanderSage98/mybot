@@ -41,7 +41,7 @@ class MusicCommands:
 			embed = self.bot.responder.emb_resp("Joining", self.vc.mention, "info")
 			return embed
 
-	async def call_func(self, func: str, **kwargs):
+	async def call_func(self, func: str, msg = None, **kwargs):
 		try:
 			to_call = self.__getattribute__(func)
 		except AttributeError:
@@ -50,6 +50,8 @@ class MusicCommands:
 		print(args)
 		if args.varkw:
 			print(to_call, kwargs)
+			if args.kwonlyargs:
+				kwargs.update({"msg": msg})
 			return await to_call(**kwargs)
 		else:
 			print(to_call)
@@ -69,7 +71,7 @@ class MusicCommands:
 		else:
 			playlist_name = ""
 
-		numbers = re.findall("\d+", search)
+		numbers = re.findall(r"\d+", search)
 		if len(numbers) in (2, 3):
 			number = slice(*[int(x) for x in numbers])
 		elif numbers:
@@ -146,8 +148,8 @@ class MusicCommands:
 		embed.add_field(**passed).add_field(**dur)
 		if ffmpeg_info and list(filter(lambda x: x[1], ffmpeg_info)):
 			times = ffmpeg_info[1][1]
-			starting_point = re.search("-ss (\S*)", times).group(1)
-			ending_point = re.search("-to (\S*)", times).group(1)
+			starting_point = re.search(r"-ss (\S*)", times).group(1)
+			ending_point = re.search(r"-to (\S*)", times).group(1)
 			start = {
 				"name": "Starting point in the track",
 				"value": self.md.cb(starting_point)
@@ -247,7 +249,9 @@ class MusicCommands:
 			"stored",
 			kwargs.pop("2") if kwargs.get("2") == "stored" else ""
 		)
-		shuffle = kwargs.pop("3") if kwargs.get("3") == "shuffle" else ""
+		shuffle = kwargs.pop(
+			"shuffle",
+			kwargs.pop("3") if kwargs.get("3") == "shuffle" else "")
 		# noinspection PyTypeChecker
 		search = kwargs.get(
 			"search",
@@ -305,7 +309,7 @@ class MusicCommands:
 
 		return self.bot.responder.emb_resp("Trying to play", search, color = "info")
 
-	async def queue(self):
+	async def queue(self, *, msg = None, **kwargs):
 		res = m.Player.get_queue_info(self.channel.guild.id)
 		if not res:
 			return self.bot.responder.emb_resp("No queue found")
@@ -342,7 +346,10 @@ class MusicCommands:
 			return emb
 
 		try:
-			msg = await self.channel.send(embed = await embed(get_short()))
+			if isinstance(msg, discord.Interaction):
+				msg = await msg.followup.send(embed = await embed(get_short()))
+			else:
+				msg = await self.channel.send(embed = await embed(get_short()))
 		except Exception as e:
 			print(e)
 			return self.bot.responder.emb_resp2("Can't fit the queue in one message, something went wrong")
@@ -387,8 +394,7 @@ class MusicCommands:
 				toggle = False
 				info_msg = await self.channel.send("Type the name of the playlist you wish to add the queue to!")
 				try:
-					playlist_name_msg: discord.Message = await self.bot.wait_for("message", check = check2,
-																				 timeout = 60.0)
+					playlist_name_msg: discord.Message = await self.bot.wait_for("message", check = check2, timeout = 60.0)
 					playlist_name = playlist_name_msg.content
 					await playlist_name_msg.delete(delay = 20.0)
 					await info_msg.delete(delay = 20.0)
@@ -435,7 +441,7 @@ class MusicCommands:
 			embed = self.bot.responder.emb_resp(*res)
 		return embed
 
-	async def showplaylist(self, **kwargs):
+	async def showplaylist(self, *, msg = None, **kwargs):
 		bot = self.bot
 		channel = self.channel
 		author = self.author
@@ -478,7 +484,10 @@ class MusicCommands:
 			return emb
 
 		embed = bot.responder.emb_resp(title, "", color)
-		msg = await channel.send(embed = edit_embed(embed))
+		if isinstance(msg, discord.Interaction):
+			msg = await msg.followup.send(embed = edit_embed(embed))
+		else:
+			msg = await channel.send(embed = edit_embed(embed))
 
 		await msg.add_reaction("⬅️")
 		await msg.add_reaction("➡️")
@@ -543,7 +552,8 @@ class MusicCommands:
 		"loop": typing.Optional[str],
 		"src": typing.Optional[int],
 		"to": typing.Optional[int],
-		"stored": typing.Optional[typing.Literal['sdstred']],
+		"stored": typing.Optional[typing.Literal['stored']],
+		"shuffle": typing.Optional[typing.Literal['shuffle']],
 		"search": typing.Optional[str]
 	}
 )
@@ -564,26 +574,30 @@ async def music(data: Result):
 		target song position - only used with move functionality
 	stored: typing.Literal
 		do not search for playlist name on youtube, use a saved one in the bot - only used with play functionality
+	shuffle: typing.Literal
+		auto-shuffle the playlist that you are about the add - only used with play functionality
 	search: str
 		song-link or playlist-link / -name – used with 'play' and 'showplaylist' functionality
 	"""
 	channel = data.message.channel
 	bot = data.bot
-	author = data.user[0]
-	args: dict[str|int, typing.Any] = data.args
+	author: discord.Member |discord.User = data.user[0]
+	args: dict[str | int, typing.Any] = data.args
 
 	vc: discord.VoiceChannel = getattr(author.voice, "channel", None)
 	func = args.get("arg0", args.get("0", ""))
 	music_commands = get_instance(channel = channel, bot = bot, vc = vc, author = author)
+	
+	# args.update({"msg": data.message})
 
 	if func:
 		if vc:
-			embed = await music_commands.call_func(func, **args)
+			embed = await music_commands.call_func(func, msg = data.message, **args)
 		else:
 			embed = bot.responder.emb_resp("You aren't connected to a voice channel!", color = "error")
 
 	else:  # TODO implement music UI thingy
-		raise RuntimeError("__**Not implemented yet!**__")
+		raise RuntimeError("__**UI based player not implemented yet!**__")
 
 	to_send = {
 		"embed": embed

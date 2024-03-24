@@ -8,9 +8,12 @@ import traceback
 import typing
 
 import helpers.other.permissions
+
 from bot_commands import Result
 from helpers.other.db_stuff import db
-from helpers.other.collections import Collection
+from helpers.other.bot_collections import Collection
+
+from string import Formatter
 
 
 class ReprBaseType:
@@ -161,9 +164,72 @@ class Markdown(str):
 		return self.s
 
 
+class Format(Formatter):
+	def format(self, format_string, *args, **kwargs):
+		temp = list(filter(lambda x: x[1] not in kwargs, self.parse(format_string)))
+		kwargs.update({k[1]: f"{{{k[1]}}}" for k in temp})
+		return self.vformat(format_string, args, kwargs)
+
+
 def to_yt_url(kind, string):
 	url = {"v": "watch", "list": "playlist"}
 	return f"https://www.youtube.com/{url[kind]}?{kind}={string}"
+
+
+def guild_update(bot, guild):
+	coll1 = db.db.get_collection("Guilds")
+	coll2 = db.db.get_collection("Settings")
+	
+	coll1.update_one({
+		"id": guild.id
+	}, {
+		"$set": {
+			"id": guild.id,
+			"name": guild.name,
+			"owner": {
+				"id": guild.owner_id,
+				"name": guild.owner.name
+			}
+		}
+	}, upsert = True)
+	setting = coll2.find_one({"guild": guild.id})
+	prefix = bot.prefix
+	
+	if setting:
+		guild_settings = setting.get("guild_settings")
+		if guild_settings:
+			prefix = guild_settings.get("prefix")
+			if not prefix:
+				coll2.update_one(
+					{
+						"guild": guild.id
+					}, {
+						"$set": {
+							"guild_settings.prefix": bot.prefix
+						}
+					}
+				)
+				prefix = bot.prefix
+		else:
+			coll2.update_one(
+				{
+					"guild": guild.id
+				}, {
+					"$set": {
+						"guild_settings.prefix": bot.prefix
+					}
+				}
+			)
+	else:
+		coll2.insert_one(
+			{
+				"guild": guild.id,
+				"guild_settings": {
+					"prefix": bot.prefix
+				}
+			}
+		)
+	return prefix
 
 
 def reformat(data: dict):
@@ -172,12 +238,12 @@ def reformat(data: dict):
 
 	def walk_dict(_data: dict, to_insert = ""):
 		for key, val in list(_data.items()):
-			if type(val) == dict:
+			if isinstance(val, dict):
 				if key in insert:
 					walk_dict(val, key)
 				else:
 					res[key] = walk_dict(val, to_insert)
-			elif type(val) == list:
+			elif isinstance(val, list):
 				if key in insert:
 					temp = walk_list(val, key)
 					for el in temp:
@@ -214,9 +280,9 @@ def reformat(data: dict):
 
 	def walk_list(_data: list, to_insert = ""):
 		for el in _data.copy():
-			if type(el) == dict:
+			if isinstance(el, dict):
 				walk_dict(el, to_insert)
-			elif type(el) == list:
+			elif isinstance(el, list):
 				walk_list(el, to_insert)
 			else:
 				pass
@@ -266,7 +332,7 @@ def parse(string, data, open_stack, ret = False, source = ""):
 				else:
 					open_stack.append(char)
 					temp = parse(it, {}, open_stack, source = "literal")
-					if type(temp) == tuple:
+					if isinstance(temp, tuple):
 						temp = ":".join(temp)
 					data[temp] = typing.Literal
 
@@ -282,7 +348,7 @@ def parse(string, data, open_stack, ret = False, source = ""):
 				else:
 					open_stack.append(char)
 					temp = parse(it, {}, open_stack, source = "numeral")
-					if type(temp) == tuple:
+					if isinstance(temp, tuple):
 						temp = ":".join(temp)
 					data[temp] = ReprInt
 
@@ -328,7 +394,7 @@ def parse(string, data, open_stack, ret = False, source = ""):
 						data.clear()
 					data["choice"] = [new_data]
 				res = parse(it, {}, open_stack, True, source = "choice")
-				if type(res) == list:
+				if isinstance(res, list):
 					data["choice"].extend(map(lambda x: x.get("group", x), res))
 				else:
 					data["choice"].append(res.get("group") or res)
@@ -340,7 +406,7 @@ def parse(string, data, open_stack, ret = False, source = ""):
 			elif char == "[":
 				if source == "required":
 					raise RuntimeError(
-						f"Can't convert to slash!\Optional value(s) inside required!\nat '{char}' before \n{''.join(it)}")
+						f"Can't convert to slash!\nOptional value(s) inside required!\nat '{char}' before \n{''.join(it)}")
 				open_stack.append("[")
 				res = parse(it, {}, open_stack, source = "optional")
 				if res:
@@ -385,8 +451,8 @@ def parse(string, data, open_stack, ret = False, source = ""):
 				if open_stack and open_stack[-1] == "<":
 					raise RuntimeError("Invalid format, placeholder inside placeholder")
 				open_stack.append("<")
-				res: str= parse(it, {}, open_stack, source = "placeholder")
-				if type(res) == tuple:
+				res: str = parse(it, {}, open_stack, source = "placeholder")
+				if isinstance(res, tuple):
 					res, details = res
 				else:
 					details = ""
@@ -410,7 +476,7 @@ def parse(string, data, open_stack, ret = False, source = ""):
 					raise RuntimeError("Received empty placeholder!")
 			elif char == ":":
 				open_stack.append(":")
-				res:str = parse(it, {}, open_stack, source = "details")
+				res: str = parse(it, {}, open_stack, source = "details")
 				if data:
 					temp = data.copy()
 					data.clear()
@@ -470,7 +536,7 @@ async def add_cmd(channel, resp, data, perm, to_add):
 						usage = re.sub(match.group(), "", usage)
 				else:
 					key_desc_main = key_desc
-				match = re.search(f"{key if not 'arg' in key else ''}.?( ?: ?{key_desc_main.strip()})", usage)
+				match = re.search(f"{key if 'arg' not in key else ''}.?( ?: ?{key_desc_main.strip()})", usage)
 				if match:
 					print(match)
 					usage = re.sub(match.group(1), "", usage)
@@ -526,6 +592,7 @@ async def add_cmd(channel, resp, data, perm, to_add):
 					new_data.append(coll[0])
 					to_put = Collection[tuple(reversed(new_data))]
 				else:
+					# noinspection PyTypeHints
 					to_put = typing.Literal[tuple(new_data)]
 					if optional:
 						to_put = typing.Optional[to_put]
@@ -646,8 +713,8 @@ async def cmd_adder(data: Result):
 	else:
 		perm = None
 	msg = await channel.send(embed = resp.emb_resp(f"Command '{data.command}' not found!", "Do you want to add it?"))
-	for reaction in reactions:
-		await msg.add_reaction(reaction)
+	for item in reactions:
+		await msg.add_reaction(item)
 
 	def check_react(r: discord.Reaction, user: discord.User):
 		return r.emoji in reactions and user == data.message.author and r.message.channel == data.message.channel
@@ -701,7 +768,7 @@ async def cmd_adder(data: Result):
 			"id": data.message.author.id,
 			"name": data.message.author.name
 		},
-		"added_on": datetime.datetime.utcnow().timestamp(),
+		"added_on": datetime.datetime.now(datetime.UTC).timestamp(),
 		"permission": perm
 	}
 	return await add_cmd(channel, resp, data, perm, to_add)
@@ -746,18 +813,18 @@ async def cmd_adder_ui(data: Result):
 
 		async def submission_handler(details: discord.Interaction):
 			await details.response.send_message(embed = resp.emb_resp("Adding command!", color = "ok"))
-			to_add = {
+			to_add: dict[str, typing.Any] = {
 				el["components"][0]["custom_id"]: el["components"][0]["value"] for el in details.data["components"]
 			}
 			to_add["name"] = data.command
-			to_add["aliases"] = list(filter(None, re.findall("(\w+|\d+)+", to_add["aliases"])))
+			to_add["aliases"] = list(filter(None, re.findall(r"(\w+|\d+)+", to_add["aliases"])))
 			to_add["usage"] = "{prefix}" + to_add["usage"]
 			to_add["usage_ex"] = "{prefix}" + (to_add["usage_ex"] or data.command)
 			to_add["added_by"] = {
 				"id": details.user.id,
 				"name": details.user.name
 			}
-			to_add["added_on"] = datetime.datetime.utcnow().timestamp()
+			to_add["added_on"] = datetime.datetime.now(datetime.UTC).timestamp()
 			new_perm = to_add.get("permission") or helpers.other.permissions.All()
 			if new_perm:
 				new_perm = getattr(
@@ -770,12 +837,12 @@ async def cmd_adder_ui(data: Result):
 
 			try:
 				res = await add_cmd(channel, resp, data, new_perm, to_add)
-			except Exception as e:
+			except Exception as ex:
 				coll = db.db.get_collection(name = "Commands")
 				coll.delete_one({"name": data.command})
 				await details.followup.send(
 					embed = client.responder.emb_resp2(
-						Markdown.cb("".join(traceback.format_tb(e.__traceback__)) + repr(e))
+						Markdown.cb("".join(traceback.format_tb(ex.__traceback__)) + repr(ex))
 					)
 				)
 			else:

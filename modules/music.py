@@ -420,7 +420,7 @@ class Player(threading.Thread):
 					}
 				)
 
-		if type(x) == int:
+		if isinstance(x, int):
 			if x < 0:
 				x = size + (x + 1)
 			else:
@@ -432,7 +432,7 @@ class Player(threading.Thread):
 				"original": [to_remove]
 			}
 
-		elif type(x) == slice:
+		elif isinstance(x, slice):
 			try:
 				to_remove = player._queue[x]
 				songs = []
@@ -488,9 +488,9 @@ class Player(threading.Thread):
 		if not player:
 			return
 		count = 1
-		if type(value) != int:
+		if not isinstance(value, int):
 			value = player.find_by_name(value)
-			if type(value) != int:
+			if not isinstance(value, int):
 				return "Error", value, "error_2"
 		while value - 1:
 			player.loop_handler()
@@ -529,9 +529,10 @@ class Player(threading.Thread):
 	def get_progress(self):
 		return self.source.buffer.pos
 	
-	def add(self, item: dict):
+	def add(self, item: dict, silent = False):
 		# if self._data.get("show"):
-		self.show(item["data"]["title"], len(self._queue))
+		if not silent:
+			self.show(item["data"]["title"], len(self._queue))
 		self._queue.append(item)
 		if not self._is_started:
 			self._is_started = True
@@ -725,7 +726,7 @@ class Player(threading.Thread):
 				self._queue.append(current)
 			
 			elif self._loop == "range":
-				numbers = list(filter(None, re.findall("\d*", self._loop_value)))
+				numbers = list(filter(None, re.findall(r"\d*", self._loop_value)))
 				
 				if not int(numbers[0]):
 					self._queue.insert(int(numbers[1]), current)
@@ -733,7 +734,7 @@ class Player(threading.Thread):
 					self._loop_value = f"{int(numbers[0]) - 1} to {int(numbers[1]) - 1}"
 			
 			elif self._loop == "after":
-				number = list(filter(None, re.findall("\d+", self._loop_value)))
+				number = list(filter(None, re.findall(r"\d+", self._loop_value)))
 				
 				if int(number[0]):
 					self._loop_value = f"after {int(number[0]) - 1}"
@@ -743,7 +744,7 @@ class Player(threading.Thread):
 			
 			elif self._loop == "until":
 				try:
-					number = list(filter(None, re.findall("\d*", self._loop_value)))
+					number = list(filter(None, re.findall(r"\d*", self._loop_value)))
 					self._queue.insert(int(number[-1]), current)
 				except Exception as e:
 					print(e, __name__)
@@ -858,10 +859,12 @@ class Downloader:
 			duration = datetime.timedelta(seconds = d.get("duration"))
 			check = datetime.timedelta(minutes = 5)
 			try:
-				expiration_time = datetime.datetime.fromtimestamp(int(re.search("expire=(\d+)", video_url).group(1)))
+				expiration_time = datetime.datetime.fromtimestamp(int(re.search(r"expire=(\d+)", video_url).group(1)))
 				expired = (lambda: expiration_time - duration - datetime.datetime.now() < check)
 			except AttributeError:
 				expired = (lambda: True)
+			thumbnails = filter(lambda thumbnail: "webp" not in thumbnail["url"], d.get("thumbnails"))
+			thumbnails = sorted(thumbnails, key = lambda x: (x.get("height") or 0) * (x.get("width") or 0))
 			new_item = {
 				"title": d.get("title"),
 				"link": d.get("webpage_url"),
@@ -869,7 +872,7 @@ class Downloader:
 				"start": None,
 				"end": None,
 				"description": d.get("description"),
-				"thumbnail": d.get("thumbnails")[-1].get("url"),
+				"thumbnail": thumbnails[-1].get("url"),
 				"url": video_url,
 				"expired": expired,
 				"user": self._data.get("author")
@@ -1037,12 +1040,15 @@ class Downloader:
 					if self._lock.locked():
 						self._lock.release()
 	
-				elif type(url) == list:
+				elif isinstance(url, list):
 					results = []
+					track_data = None
 					
 					if self._data.get("type") == "default":
 						update_msg("Estimated time:", str(datetime.timedelta(seconds = len(url))), "info")
-					
+					if self._data.pop("sh", None):
+						random.shuffle(url)
+				
 					for el in url:
 						# print(el, type(el), el[0], el[1])
 						# now = datetime.datetime.now()
@@ -1089,8 +1095,10 @@ class Downloader:
 									)
 									response = request.execute()
 									try:
+										dur = track_data["data"]["duration"]-30 if track_data and len(url) < 30 else 60 * 5
 										new_url = u.to_yt_url("v", response["items"][0]["id"]["videoId"])
 										content = f"{self._data.get('author').mention}\nDo you want to add {new_url} instead?"
+										content += f"\nTime left to decide: <t:{datetime.datetime.now(datetime.UTC) + dur}:R>"
 										check_msg = asyncio.run_coroutine_threadsafe(
 											msg.channel.send(content),
 											self._bot.loop
@@ -1101,7 +1109,7 @@ class Downloader:
 											self._bot.loop
 										)
 										
-										if future.result(timeout = 30) == "✅":
+										if future.result(timeout = dur) == "✅":
 											func = (lambda save_url = new_url: clean(
 												self._ytdl.extract_info(save_url, download = False)))
 											data = func()
@@ -1109,8 +1117,11 @@ class Downloader:
 												"data": data,
 												"func": func
 											}
-											results.append(track_data)
-										
+											if len(url) < 30:
+												results.append(track_data)
+											else:
+												self._player.add(track_data, True)
+									
 									except TimeoutError:
 										self._bot.loop.create_task(msg.channel.send("You took too long, continuing!"))
 									except KeyError:
@@ -1126,12 +1137,14 @@ class Downloader:
 							"data": data,
 							"func": func
 						}
-						results.append(track_data)
+						if len(url) < 30:
+							results.append(track_data)
+						else:
+							self._player.add(track_data, True)
 						# print(datetime.datetime.now() - now)
 					else:  # execute when every song has been added to result list
-						if self._data.pop("sh", None):
-							random.shuffle(results)
-						self._player.add_multiple(results)
+						if len(url) < 30:
+							self._player.add_multiple(results)
 						if self._data.get("type") == "default":
 							update_msg("Done", "", "ok")
 						if self._lock.locked():

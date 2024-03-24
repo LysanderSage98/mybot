@@ -1,13 +1,6 @@
 import discord
 import threading
-import os
 import pathlib
-try:
-	pass
-	# os.remove("data/MyBot.db")
-	# os.remove("data/MyBot.db-journal")
-except FileNotFoundError:
-	pass
 from helpers.other import responder
 from modules import bot, music, gui
 

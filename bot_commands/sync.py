@@ -1,5 +1,3 @@
-import discord
-
 from helpers.other.permissions import Permissions
 from . import Result
 

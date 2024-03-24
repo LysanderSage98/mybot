@@ -1,7 +1,7 @@
 import discord
 
 from helpers.other.permissions import Permissions, db
-from helpers.other.collections import Collection
+from helpers.other.bot_collections import Collection
 from . import Result
 
 

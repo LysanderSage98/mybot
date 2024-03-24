@@ -1,19 +1,8 @@
-from helpers.other import db_stuff as db
+import discord
+
+# from helpers.other import db_stuff as db
+from helpers.other import utilities as u
 
 
-def guild_handler(guild):
-	coll = db.db.get_collection("Lists")
-	coll.update_one({
-		"name": "guilds"
-	}, {
-		"$addToSet": {
-			"joined": {
-				"id": guild.id,
-				"guild": guild.name,
-				"owner": {
-					"id": guild.owner_id,
-					"name": guild.owner.name
-				}
-			}
-		}
-	}, upsert = True)
+def guild_join_handler(bot, guild: discord.Guild):
+	u.guild_update(bot, guild)
