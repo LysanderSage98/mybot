@@ -776,6 +776,12 @@ class Player(threading.Thread):
 
 
 class Downloader:
+	
+	class Comp(dict):
+		
+		def __lt__(self, other):
+			return self["url"] != "None" and other["url"] == "None"
+		
 	_downloaders = {}
 	_api_info = json.load(open("data/info.json", "r"))["api_info"]
 	kwargs = {
@@ -810,7 +816,7 @@ class Downloader:
 		self._downloaders[data["_id"]] = self
 		self._work = True
 		self._data = data
-		self._playlist = ""
+		# self._playlist = ""
 		self._coll = db.db.get_collection("PlayerCache")
 		self._name = data["_id"]
 		self._ytdl = ytdl.YoutubeDL({
@@ -824,7 +830,7 @@ class Downloader:
 		api_info = self.__class__._api_info
 		self.youtube = googleapiclient.discovery.build(api_info[0], api_info[1], developerKey = api_info[2])
 		self._player: Player = data.get("player")
-		self._queue = queue.Queue()
+		self._queue = queue.PriorityQueue()
 		self._bot = data.get("bot")
 		self._lock = threading.Lock()
 		self.add(data)
@@ -834,7 +840,7 @@ class Downloader:
 		return f"Downloader for {self._data.get('author')} in {self._data.get('guild')}"
 	
 	def add(self, data: dict):
-		self._queue.put(data)
+		self._queue.put(self.Comp(data))
 	
 	def stop(self):
 		self._work = False
@@ -879,7 +885,7 @@ class Downloader:
 			}
 			return new_item
 		
-		def update_msg(title = "", desc = "", color = "", _type = "embed"):
+		def update_msg(message, title = "", desc = "", color = "", _type = "embed"):
 			if _type == "embed":
 				kwargs = {
 					"embed": self._bot.responder.emb_resp(title, desc, color)
@@ -891,33 +897,33 @@ class Downloader:
 			else:
 				return None
 			self._bot.loop.create_task(
-				msg.edit(**kwargs)
+				message.edit(**kwargs)
 			)
 			
 		while True:
+			print(self, "waiting for current data to be processed")
+			self._lock.acquire(blocking = True)
+			if not self._queue:
+				print("something went wrong, no queue object found on first start!")
+				break
+			
+			print(self, "waiting for data")
+			new_data = self._queue.get()
+			if not new_data:
+				break
+			print(new_data)
+			# if not self._data:
+			# 	self._data.update(new_data)
+			
+			url = new_data.get("url")
+			
+			if not url:
+				continue
+			
 			try:
-				print(self, "waiting for current data to be processed")
-				self._lock.acquire(blocking = True)
-				if not self._queue:
-					print("something went wrong, no queue object found on first start!")
-					break
-					
-				print(self, "waiting for data")
-				new_data = self._queue.get()
-				if not new_data:
-					break
-				self._data.update(new_data)
-				
-				msg = self._data.get("msg")
-				
-				url = new_data.get("url")
-				print(url)
-				
-				if not url:
-					continue
-	
 				if "list" in url:
-					self._playlist = ""
+					msg = new_data.get("msg")  # sent by bot, so the bot can edit it as well
+					# elf._playlist = ""
 					playlist = []
 					playlist_id = re.search("list=(.{18,34})", url, re.I).group(1)
 					self._api_args["playlistId"] = playlist_id
@@ -927,7 +933,7 @@ class Downloader:
 					if response.get("error"):
 						print(response)
 						if self._data.get("type") == "default":
-							update_msg(
+							update_msg(msg,
 								"Error",
 								"Youtube API denied that request\n" + json.dumps(response, indent = 4),
 								"error_2"
@@ -944,7 +950,7 @@ class Downloader:
 						
 						print("updating playlist!")
 						if self._data.get("type") == "default":
-							update_msg(desc = "Updating local playlist cache!", _type = "text")
+							update_msg(msg, desc = "Updating local playlist cache!", _type = "text")
 						self._coll.find_one_and_update(
 							{"name": playlist_id},
 							{
@@ -976,7 +982,7 @@ class Downloader:
 							if response.get("error"):
 								print(response)
 								if self._data.get("type") == "default":
-									update_msg(
+									update_msg(msg,
 										"Error",
 										"Youtube API denied that request\n" + json.dumps(response, indent = 4),
 										"error_2"
@@ -992,18 +998,19 @@ class Downloader:
 							
 						self._coll.find_one_and_update({"name": playlist_id}, {"$set": {"items": playlist}})
 					
-					self._data["url"] = playlist
-					self.add(self._data)
+					new_data["url"] = playlist
+					self.add(new_data)
 					if self._lock.locked():
 						self._lock.release()
 	
 				elif "watch" in url:
+					msg = new_data.get("msg")  # sent by bot, so the bot can edit it as well
 					func = (lambda own_url = url: clean(self._ytdl.extract_info(own_url, download = False)))
 					try:
 						data = func()
 					except Exception as e:
 						if self._data.get("type") == "default":
-							update_msg(f"Error in {url}", str(e), "error_2")
+							update_msg(msg, f"Error in {url}", str(e), "error_2")
 						continue
 					track_data = {
 						"ffmpeg_options": new_data.get("ffmpeg_options"),
@@ -1012,17 +1019,18 @@ class Downloader:
 					}
 					self._player.add(track_data)
 					if self._data.get("type") == "default":
-						update_msg("Done", "", "ok")
+						update_msg(msg, "Done", "", "ok")
 					if self._lock.locked():
 						self._lock.release()
 					
-				elif new_data.get("play_all"):
+				elif url == "None":
+					msg = new_data.get("msg")  # sent by bot, so the bot can edit it as well
 					playlist_name = new_data.get("play_all")
 					if self._data.get("type") == "default":
-						update_msg(desc = f"Adding all songs from playlist `{playlist_name}` to queue", _type = "text")
+						update_msg(msg, desc = f"Adding all songs from playlist `{playlist_name}` to queue", _type = "text")
 					songs_data = db.db.get_collection("Playlists").find_one(
 						{
-							"user": self._data["author"].id,
+							"user": new_data["author"].id,
 							"name": playlist_name
 						}
 					)
@@ -1030,32 +1038,34 @@ class Downloader:
 						songs = songs_data["songs"]
 					else:
 						if self._data.get("type") == "default":
-							update_msg("Error", f"Playlist {new_data.get('play_all')} wasn't found!", "error")
+							update_msg(msg, "Error", f"Playlist {new_data.get('play_all')} wasn't found!", "error")
 						if self._lock.locked():
 							self._lock.release()
 						continue
-					self._data["url"] = songs
-					self._playlist = self._data.pop("play_all")
-					self.add(self._data)
+					new_data["url"] = songs
+					# self._playlist = new_data.pop("play_all")
+					self.add(new_data)
 					if self._lock.locked():
 						self._lock.release()
 	
 				elif isinstance(url, list):
+					msg = new_data.get("msg")  # sent by bot, so the bot can edit it as well
+					playlist_name = new_data.get("play_all")
 					results = []
 					track_data = None
 					
 					if self._data.get("type") == "default":
-						update_msg("Estimated time:", str(datetime.timedelta(seconds = len(url))), "info")
-					if self._data.pop("sh", None):
+						update_msg(msg, "Estimated time:", str(datetime.timedelta(seconds = len(url))), "info")
+					if new_data.pop("sh", None):
 						random.shuffle(url)
 				
 					for el in url:
-						# print(el, type(el), el[0], el[1])
+						print(el, type(el), el[0], el[1])
 						# now = datetime.datetime.now()
 
 						if not self._work:
 							if self._data.get("type") == "default":
-								update_msg("Aborted adding the playlist", "", "info")
+								update_msg(msg, "Aborted adding the playlist", "", "info")
 							break
 							
 						if type(el) in (tuple, list):
@@ -1076,8 +1086,8 @@ class Downloader:
 								print(link, name)
 								db.db.get_collection("Playlists").find_one_and_update(
 									{
-										"user": self._data["author"].id,
-										"name": self._playlist
+										"user": new_data["author"].id,
+										"name": playlist_name  # self._playlist
 									}, {
 										"$pull": {
 											"songs": el
@@ -1097,7 +1107,7 @@ class Downloader:
 									try:
 										dur = track_data["data"]["duration"]-30 if track_data and len(url) < 30 else 60 * 5
 										new_url = u.to_yt_url("v", response["items"][0]["id"]["videoId"])
-										content = f"{self._data.get('author').mention}\nDo you want to add {new_url} instead?"
+										content = f"{new_data.get('author').mention}\nDo you want to add {new_url} instead?"
 										content += f"\nTime left to decide: <t:{datetime.datetime.now(datetime.UTC) + dur}:R>"
 										check_msg = asyncio.run_coroutine_threadsafe(
 											msg.channel.send(content),
@@ -1105,7 +1115,7 @@ class Downloader:
 										).result()
 										
 										future = asyncio.run_coroutine_threadsafe(
-											u.reaction(check_msg, self._data.get("author"), self._bot),
+											u.reaction(check_msg, new_data.get("author"), self._bot),
 											self._bot.loop
 										)
 										
@@ -1120,7 +1130,7 @@ class Downloader:
 											if len(url) < 30:
 												results.append(track_data)
 											else:
-												self._player.add(track_data, True)
+												self._player.add(track_data)
 									
 									except TimeoutError:
 										self._bot.loop.create_task(msg.channel.send("You took too long, continuing!"))
@@ -1129,8 +1139,8 @@ class Downloader:
 									except Exception as e:
 										print(e, e.__traceback__.tb_lineno)
 								
-							if self._lock.locked():
-								self._lock.release()
+							# if self._lock.locked():
+							# 	self._lock.release()
 							continue
 							
 						track_data = {
@@ -1146,7 +1156,7 @@ class Downloader:
 						if len(url) < 30:
 							self._player.add_multiple(results)
 						if self._data.get("type") == "default":
-							update_msg("Done", "", "ok")
+							update_msg(msg, "Done", "", "ok")
 						if self._lock.locked():
 							self._lock.release()
 						continue
@@ -1156,14 +1166,16 @@ class Downloader:
 					break
 				
 				else:
+					msg = new_data.get("msg")  # sent by bot, so the bot can edit it as well
 					if self._data.get("type") == "default":
-						update_msg("Error", f"received invalid data type {type(url)}", "error_2")
+						update_msg(msg, "Error", f"received invalid data type {type(url)}", "error_2")
 					if self._lock.locked():
 						self._lock.release()
 					
 			except Exception as e:
+				msg = new_data.get("msg")  # sent by bot, so the bot can edit it as well
 				if self._data.get("type") == "default":
-					update_msg("❌ Error! Something went wrong!", f"{e}\n{e.__traceback__.tb_lineno}", "error_2")
+					update_msg(msg, "❌ Error! Something went wrong!", f"{e}\n{e.__traceback__.tb_lineno}", "error_2")
 				print(e, e.__traceback__.tb_lineno)
 				if self._lock.locked():
 					self._lock.release()
