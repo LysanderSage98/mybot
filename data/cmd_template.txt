@@ -4,6 +4,7 @@ from helpers.other.permissions import Permissions, db
 {coll}
 from . import Result
 
+
 @Permissions.register_command({perm}{slash})
 async def {cmd}(data: Result):
 	"""{desc}"""

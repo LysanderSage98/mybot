@@ -112,7 +112,7 @@ class FFmpegPCMAudioCopy(discord.FFmpegAudio):
 		if proc is None:
 			return
 		
-		log.info('Preparing to terminate ffmpeg process %s.', proc.pid)
+		# log.info('Preparing to terminate ffmpeg process %s.', proc.pid)
 		
 		try:
 			proc.kill()
@@ -141,7 +141,7 @@ class AudioPlayer(threading.Thread):
 		self.daemon = True
 		self.bot = bot
 		self.after = after
-		self.reader = None
+		self.readers = {}
 		
 		self._source: FFmpegPCMAudioCopy = source
 		self._end = threading.Event()
@@ -169,7 +169,9 @@ class AudioPlayer(threading.Thread):
 			# are we paused?
 			if not self._resumed.is_set():
 				# wait until we aren't
+				print("PAUSED", self._source)
 				self._resumed.wait()
+				print("RESUMED", self._source)
 				continue
 			
 			# are we disconnected from voice?
@@ -199,8 +201,8 @@ class AudioPlayer(threading.Thread):
 	
 	def run(self):
 		try:
-			self.reader = threading.Thread(target = self._source.read)
-			self.reader.start()
+			self.readers[self._source] = threading.Thread(target = self._source.read)
+			self.readers[self._source].start()
 			self._do_run()
 		except Exception as exc:
 			self._current_error = exc
@@ -254,6 +256,9 @@ class AudioPlayer(threading.Thread):
 		with self._lock:
 			self.pause(update_speaking = False)
 			self._source = source
+			if not self.readers.get(source):
+				self.readers[source] = threading.Thread(target = source.read)
+				self.readers[source].start()
 			self.resume(update_speaking = False)
 	
 	def _speak(self, speaking):
@@ -296,12 +301,15 @@ class Player(threading.Thread):
 		r"until ?\d+": "until",
 		r"\d+": "number"
 	}
+	_queue_counters = {}
 	
 	@classmethod
 	def get_player(cls, _id):
 		"""
 		@param _id: discord guild.id as string
 		"""
+		if isinstance(_id, Player):
+			_id = _id._name
 		player: Player = cls._players.get(str(_id))
 		return player
 	
@@ -345,16 +353,56 @@ class Player(threading.Thread):
 		if not player:
 			return
 		to_return = {
-			"title": player._current["title"],
-			"duration": player._current["duration"],
-			"link": player._current["link"],
-			"thumbnail": player._current["thumbnail"],
-			"description": player._current["description"],
+			"title": player._currently_playing[player._queue]["title"],
+			"duration": player._currently_playing[player._queue]["duration"],
+			"link": player._currently_playing[player._queue]["link"],
+			"thumbnail": player._currently_playing[player._queue]["thumbnail"],
+			"description": player._currently_playing[player._queue]["description"],
 			"passed": player.get_progress(),
 			"buffer_status": player.get_buffer_progress(),
-			"ffmpeg_options": player._current.get("ffmpeg_options")
+			"ffmpeg_options": player._currently_playing[player._queue].get("ffmpeg_options")
 		}
 		return to_return
+	
+	@classmethod
+	def get_queues_info(cls, _id):
+		"""
+		@param _id: discord guild.id
+		"""
+		player = cls.get_player(_id)
+		if not player:
+			return
+		data = {x: len(y) for x, y in player._queues.items()}
+		print(data)
+		return data, player._queue
+	
+	@classmethod
+	def switch_queues(cls, _id, val, new = False):
+		"""
+		@param _id: discord guild.id
+		@param val: queue to try switching to
+		@param new: switch into entirely new queue
+		"""
+		player = cls.get_player(_id)  # todo move that block into decorator
+		if not player:
+			return
+		print("in switch queues:", _id, val, new)
+		
+		q = player._queues.get(val)
+		if q is None:
+			return -1
+		
+		player._queue = val
+		source = player.sources.get(val)
+		if not new and source:
+			player.source = source
+			player._v_c.source = player.source
+		elif not source:
+			player.source = None
+			player._event.set()
+		else:
+			player.source = None
+		return 1
 	
 	@classmethod
 	def get_queue_info(cls, _id):
@@ -364,17 +412,17 @@ class Player(threading.Thread):
 		player = cls.get_player(_id)
 		if not player:
 			return
-		# print(player._queue)
+		# print(player._queues[player._queue])
 		data = map(
 			lambda x: {
 				'title': x['data']['title'],
 				'duration': x['data']['duration'],
 				'link': x['data']['link']
-			}, player._queue
+			}, player._queues[player._queue]
 		)
 		# print(data)
 		return list(data), player._loop_value
-	
+
 	@classmethod
 	def shuffle(cls, _id):
 		"""
@@ -383,13 +431,13 @@ class Player(threading.Thread):
 		player = cls.get_player(_id)
 		if not player:
 			return
-		current = player._queue[0]
-		# print(player._queue)
-		temp = [el for el in player._queue][1:]
+		current = player._queues[player._queue][0]
+		# print(player._queues[player._queue])
+		temp = [el for el in player._queues[player._queue]][1:]
 		# print(temp)
 		random.shuffle(temp)
-		player._queue.clear()
-		player._queue.extend([current, *temp])
+		player._queues[player._queue].clear()
+		player._queues[player._queue].extend([current, *temp])
 	
 	@classmethod
 	def edit_queue(cls, _id, x, y = 0, keep = True, playlist = None):
@@ -404,10 +452,10 @@ class Player(threading.Thread):
 		player = cls.get_player(_id)
 		if not player:
 			return
-		size = len(player._queue)
+		size = len(player._queues[player._queue])
 		
 		def remove(song):
-			player._queue.remove(song)
+			player._queues[player._queue].remove(song)
 			if playlist:
 				db.db.get_collection("Playlists").find_one_and_update(
 					{
@@ -425,7 +473,7 @@ class Player(threading.Thread):
 				x = size + (x + 1)
 			else:
 				x %= size
-			to_remove: dict = player._queue[x]
+			to_remove: dict = player._queues[player._queue][x]
 			remove(to_remove)
 			to_remove = {
 				"title": to_remove["data"]["title"],
@@ -434,7 +482,7 @@ class Player(threading.Thread):
 
 		elif isinstance(x, slice):
 			try:
-				to_remove = player._queue[x]
+				to_remove = player._queues[player._queue][x]
 				songs = []
 				for item in to_remove:
 					remove(item)
@@ -450,7 +498,7 @@ class Player(threading.Thread):
 		elif type(x) in (list, tuple):
 			songs = []
 			for number in reversed(x):
-				to_remove: dict = player._queue[number]
+				to_remove: dict = player._queues[player._queue][number]
 				remove(to_remove)
 				songs.append(to_remove)
 			to_remove = {
@@ -467,13 +515,13 @@ class Player(threading.Thread):
 				y = size + (y + 1)
 			else:
 				y %= size
-			player._queue.insert(y, to_remove["original"])
-			if y == 0 or to_remove["original"]["data"] == player._current:
+			player._queues[player._queue].insert(y, to_remove["original"])
+			if y == 0 or to_remove["original"]["data"] == player._currently_playing[player._queue]:
 				player._v_c.stop()
 			return f"Moved {to_remove['title']} to position {y}!", "", "success"
 		
 		else:
-			if player._current in map(lambda original: original["data"], to_remove["original"]):
+			if player._currently_playing[player._queue] in map(lambda original: original["data"], to_remove["original"]):
 				player._skipped = True
 				player._v_c.stop()
 			return "Removed", f"```{to_remove['title']}```", "success"
@@ -492,6 +540,7 @@ class Player(threading.Thread):
 			value = player.find_by_name(value)
 			if not isinstance(value, int):
 				return "Error", value, "error_2"
+		value = value % len(player._queues[player._queue])
 		while value - 1:
 			player.loop_handler()
 			count += 1
@@ -500,14 +549,19 @@ class Player(threading.Thread):
 		player._v_c.stop()
 		return "Skipped", f"{count} songs!", "success"
 	
+	def queue_idx(self):
+		c = self._queue_counters.get(self._name, 0) + 1
+		self._queue_counters[self._name] = c
+		return c  # int((int(self._name) / datetime.datetime.now(datetime.UTC).timestamp())**0.5)
+	
 	def __init__(self, name: str, v_c: VoiceClientCopy, data):
 		self._players[name] = self
 		super().__init__(name = name)
 		self.bot = data["bot"]
+		self.sources = {}
 		self.source = None
 		self._data = data
 		self._skipped = False
-		self._queue = deque()
 		self._v_c = v_c
 		self._event = threading.Event()
 		self._ffmpeg_options = {
@@ -515,37 +569,54 @@ class Player(threading.Thread):
 			"before_options": " -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 		}
 		self._name = name
+		null_queue = self.queue_idx()
+		self._queues = {null_queue: deque()}
+		self._queue = null_queue
 		self._work = True
 		self._loop = "stop"
 		self._loop_value = ""
 		self._error_count = 0
-		self._current = None
+		self._currently_playing = {}
 		self._finished = False
 		self._is_started = False
 		
 	def __repr__(self):
 		return f"Player for {self._data.get('guild')}"
 	
+	def new(self, do_switch = True, name = None):
+		val = name or self.queue_idx()
+		if val not in self._queues:
+			self._queues[val] = deque()
+		if do_switch:
+			self.switch_queues(self._name, val, True)
+		return val
+	
 	def get_progress(self):
 		return self.source.buffer.pos
 	
-	def add(self, item: dict, silent = False):
+	def add(self, item: dict, new, silent = False):
 		# if self._data.get("show"):
+		q = new or self._queue
 		if not silent:
-			self.show(item["data"]["title"], len(self._queue))
-		self._queue.append(item)
+			self.show(item["data"]["title"], len(self._queues[q]))
+		self._queues[q].append(item)
 		if not self._is_started:
 			self._is_started = True
 			print(self, "started")
 			self._event.set()
+		elif new and len(self._queues[q]) >= 1:
+			self._event.set()
 	
-	def add_multiple(self, items: List[dict]):
+	def add_multiple(self, items: List[dict], new):
 		# if self._data.get("show"):
-		self.show(f"{len(items)} songs", len(self._queue))
-		self._queue.extend(items)
+		q = new or self._queue
+		self.show(f"{len(items)} songs", len(self._queues[q]))
+		self._queues[q].extend(items)
 		if not self._is_started:
 			self._is_started = True
 			print(self, "started")
+			self._event.set()
+		elif new and len(self._queues[q]) >= 1:
 			self._event.set()
 	
 	def update_data(self, data: dict):
@@ -563,8 +634,8 @@ class Player(threading.Thread):
 	def stop(self):
 		self._work = False
 		self._finished = True
-		self._queue.clear()
-		self._queue.append(None)
+		self._queues[self._queue].clear()
+		self._queues[self._queue].append(None)
 		self._event.set()
 		for downloader in Downloader.get_all(key = lambda x: self._name in x[0]):
 			downloader.stop()
@@ -572,8 +643,8 @@ class Player(threading.Thread):
 		# return self._data["loop"].create_task(self._v_c.disconnect(force = True))
 	
 	def del_current(self, playlist = None):
-		self._current = None
-		temp = self._queue.popleft()
+		self._currently_playing[self._queue] = None
+		temp = self._queues[self._queue].popleft()
 		self._skipped = True
 		self._v_c.stop()
 		if playlist:
@@ -592,7 +663,7 @@ class Player(threading.Thread):
 	def find_by_name(self, name: str, multi = False):
 		if not name:
 			return None
-		items = list(map(lambda x: (x[1]['data'].get("title"), x[0]), enumerate(self._queue)))
+		items = list(map(lambda x: (x[1]['data'].get("title"), x[0]), enumerate(self._queues[self._queue])))
 		# print(items)
 		results = list(
 			filter(
@@ -614,6 +685,7 @@ class Player(threading.Thread):
 				return "No song found!"
 	
 	def run(self):
+		print("Started", self)
 		
 		async def reconnect(src):
 			print("%", self._v_c)
@@ -622,31 +694,34 @@ class Player(threading.Thread):
 			await self._v_c.channel.connect(cls = VoiceClientCopy)
 			await self._v_c.play(src, after = self.after)
 		
-		async def info():
+		async def info(q):
 			try:
 				title = "🎵 Now playing:"
-				song_title = self._current['title']
-				desc = f"[{song_title}]({self._current['link']}) ({self._current['duration']})"
+				song_title = self._currently_playing[q]['title']
+				desc = f"[{song_title}]({self._currently_playing[q]['link']}) ({self._currently_playing[q]['duration']})"
 				embed = self.bot.responder.emb_resp(title, desc, "info")
-				embed.set_author(name = f"Requested by {self._current['user']}")
-				embed = embed.set_thumbnail(url = self._current["thumbnail"])
+				embed.set_author(name = f"Requested by {self._currently_playing[q]['user']}")
+				embed = embed.set_thumbnail(url = self._currently_playing[q]["thumbnail"])
 				try:
-					next_song = self._queue[1]["data"]["title"]
-					next_song += f" ({self._queue[1]['data']['duration']})"
+					next_song = self._queues[q][1]["data"]["title"]
+					next_song += f" ({self._queues[q][1]['data']['duration']})"
 				except IndexError:
 					next_song = "None"
 				embed.add_field(name = "next:", value = next_song)
 				
 				await self._data["channel"].send(embed = embed, delete_after = 60.0)
 			except Exception as e2:
-				await self._data["channel"].send(embed = self.bot.responder.emb_resp2(f"{type(e2)}, {e2}"))
+				await self._data["channel"].send(
+					embed = self.bot.responder.emb_resp2(
+						f"({type(e2)}, Line: {e2.__traceback__.tb_lineno}), {e2}"))
 		
 		while self._work:
 			try:
 				if not self._is_started:
 					print(self, "waiting for first music")
 					self._event.wait()
-				temp = self._queue[0]
+				_q = self._queue
+				temp = self._queues[_q][0]
 				if not temp:
 					break
 				# print(temp)
@@ -659,23 +734,33 @@ class Player(threading.Thread):
 						"data": video_data,
 						"func": temp["func"]
 					}
-					self._queue.popleft()
-					self._queue.appendleft(new_data)
-				self._current = video_data
-				ffmpeg_options = self._ffmpeg_options.copy()
-				if temp.get("ffmpeg_options"):
-					self._current.update({"ffmpeg_options": temp["ffmpeg_options"]})
-					ffmpeg_options[temp["ffmpeg_options"][0][0]] += temp["ffmpeg_options"][0][1]
-					ffmpeg_options[temp["ffmpeg_options"][1][0]] += temp["ffmpeg_options"][1][1]
-				self.source = FFmpegPCMAudioCopy(source = self._current["url"], **ffmpeg_options)
+					self._queues[_q].popleft()
+					self._queues[_q].appendleft(new_data)
+				show = False
+				if not self.source:
+					self._currently_playing[_q] = video_data
+					ffmpeg_options = self._ffmpeg_options.copy()
+					if temp.get("ffmpeg_options"):
+						self._currently_playing[_q].update({"ffmpeg_options": temp["ffmpeg_options"]})
+						ffmpeg_options[temp["ffmpeg_options"][0][0]] += temp["ffmpeg_options"][0][1]
+						ffmpeg_options[temp["ffmpeg_options"][1][0]] += temp["ffmpeg_options"][1][1]
+					self.source = FFmpegPCMAudioCopy(source = self._currently_playing[_q]["url"], **ffmpeg_options)
+					self.sources[_q] = self.source
+					if self._v_c.is_playing():  # no source but playing? -> switch to new source from some other queue
+						show = True
+						self._v_c.source = self.source
 				print("playing")
 				try:
-					self._v_c.play(self.source, after = self.after)
-				except discord.ClientException:
+					if not self._v_c.is_playing():
+						show =  True
+						self._v_c.play(self.source, after = self.after)
+				except discord.ClientException as e:
+					print(e)
 					break
 					# self._data["loop"].create_task(reconnect(self.source))
-					
-				self._data["loop"].create_task(info())
+				
+				if show:
+					self._data["loop"].create_task(info(_q))
 				if self._is_started:
 					print(self, "waiting for music")
 					self._event.wait()
@@ -705,16 +790,25 @@ class Player(threading.Thread):
 		if self._skipped:
 			return
 		try:
-			current = self._queue.popleft()
+			current = self._queues[self._queue].popleft()
 			# print(current["data"]["title"])
 		except (IndexError, TypeError):
 			return
-		# print(self._loop, self._queue)
+		# print(self._loop, self._queues[self._queue])
 		
-		if not self._queue and self._loop == "stop":
+		if not self._queues[self._queue] and self._loop == "stop":
+			q = self._queues.pop(self._queue)  # pop to get next queue in dict if there are others
+			self.sources.pop(self._queue)
+			self._currently_playing.pop(self._queue)
 			print("music queue empty, finishing")
-			if not self._finished:
+			if not self._queues and not self._finished:
+				self._queues[self._queue] = q  # fill back in because we're finishing anyway now
 				self.stop()
+			elif self._queues and not self._finished:
+				self._queue = next(iter(self._queues.keys()))  # get next queue in dict
+				if self._v_c.is_playing():
+					self.source = self.sources[self._queue]
+					self._v_c.source = self.source
 		
 		else:
 			# print("loop:", self._loop)
@@ -723,13 +817,13 @@ class Player(threading.Thread):
 				pass
 			
 			elif self._loop == "all":
-				self._queue.append(current)
+				self._queues[self._queue].append(current)
 			
 			elif self._loop == "range":
 				numbers = list(filter(None, re.findall(r"\d*", self._loop_value)))
 				
 				if not int(numbers[0]):
-					self._queue.insert(int(numbers[1]), current)
+					self._queues[self._queue].insert(int(numbers[1]), current)
 				else:
 					self._loop_value = f"{int(numbers[0]) - 1} to {int(numbers[1]) - 1}"
 			
@@ -740,12 +834,12 @@ class Player(threading.Thread):
 					self._loop_value = f"after {int(number[0]) - 1}"
 				else:
 					self._loop = "all"
-					self._queue.append(current)
+					self._queues[self._queue].append(current)
 			
 			elif self._loop == "until":
 				try:
 					number = list(filter(None, re.findall(r"\d*", self._loop_value)))
-					self._queue.insert(int(number[-1]), current)
+					self._queues[self._queue].insert(int(number[-1]), current)
 				except Exception as e:
 					print(e, __name__)
 			
@@ -754,7 +848,7 @@ class Player(threading.Thread):
 				# print("loop one song at", match)
 				
 				if not match:
-					self._queue.insert(0, current)
+					self._queues[self._queue].insert(0, current)
 				else:
 					self._loop_value = str(match - 1)
 	
@@ -765,6 +859,7 @@ class Player(threading.Thread):
 		print("ERROR:", error)
 		
 		self.loop_handler()
+		self.source = None
 		self._skipped = False
 		self._event.set()
 	
@@ -775,12 +870,12 @@ class Player(threading.Thread):
 			return f"```{datetime.timedelta(seconds = int(self.source.buffer.qsize() * 0.02))}```"
 
 
-class Downloader:
+class Downloader(threading.Thread):
 	
 	class Comp(dict):
 		
 		def __lt__(self, other):
-			return self["url"] != "None" and other["url"] == "None"
+			return isinstance(self["url"], list)
 		
 	_downloaders = {}
 	_api_info = json.load(open("data/info.json", "r"))["api_info"]
@@ -813,6 +908,7 @@ class Downloader:
 		cls._downloaders.pop(_id)
 
 	def __init__(self, **data):
+		super().__init__(name = data["_id"])
 		self._downloaders[data["_id"]] = self
 		self._work = True
 		self._data = data
@@ -820,6 +916,11 @@ class Downloader:
 		self._coll = db.db.get_collection("PlayerCache")
 		self._name = data["_id"]
 		self._ytdl = ytdl.YoutubeDL({
+			"extractor_args": {
+				"youtube": {
+					"player_client": ["web"]
+				}
+			},
 			"quiet": True,
 			# "verbose": True,
 			"format": "bestaudio/best",
@@ -834,7 +935,7 @@ class Downloader:
 		self._bot = data.get("bot")
 		self._lock = threading.Lock()
 		self.add(data)
-		self.run()
+		# self.run()
 		
 	def __repr__(self):
 		return f"Downloader for {self._data.get('author')} in {self._data.get('guild')}"
@@ -848,6 +949,7 @@ class Downloader:
 		self._queue.put_nowait(None)
 	
 	def run(self):
+		print("Started", self)
 		# def get_urls(item_list):
 		# 	return map(lambda item: u.concat(("watch", "v"), item["contentDetails"]["videoId"]), item_list)
 		
@@ -911,7 +1013,7 @@ class Downloader:
 			new_data = self._queue.get()
 			if not new_data:
 				break
-			print(new_data)
+			print("in downloader:", new_data)
 			# if not self._data:
 			# 	self._data.update(new_data)
 			
@@ -919,6 +1021,16 @@ class Downloader:
 			
 			if not url:
 				continue
+				
+			new = new_data.get("new")
+			print(type(url))
+			if new is True:
+				new = self._player.new(do_switch = False)
+				new_data["new"] = new
+				print("created new queue:", new)
+			elif new is not False:
+				self._player.new(do_switch = False, name = new)
+				print("created new queue:", new)
 			
 			try:
 				if "list" in url:
@@ -1009,17 +1121,21 @@ class Downloader:
 					try:
 						data = func()
 					except Exception as e:
+						print(e)
 						if self._data.get("type") == "default":
 							update_msg(msg, f"Error in {url}", str(e), "error_2")
+						if self._lock.locked():
+							self._lock.release()
 						continue
 					track_data = {
 						"ffmpeg_options": new_data.get("ffmpeg_options"),
 						"data": data,
 						"func": func
 					}
-					self._player.add(track_data)
+					self._player.add(track_data, new)
 					if self._data.get("type") == "default":
 						update_msg(msg, "Done", "", "ok")
+						self._player.switch_queues(self._player, new)
 					if self._lock.locked():
 						self._lock.release()
 					
@@ -1081,20 +1197,9 @@ class Downloader:
 						try:
 							data = func()
 						except Exception as e:
-							print(name, link)
+							print(e)
 							if name:
 								print(link, name)
-								db.db.get_collection("Playlists").find_one_and_update(
-									{
-										"user": new_data["author"].id,
-										"name": playlist_name  # self._playlist
-									}, {
-										"$pull": {
-											"songs": el
-										}
-									}
-								)
-							
 								if self._data.get("type") == "default":
 									self._bot.loop.create_task(msg.channel.send(embed = self._bot.responder.emb_resp(
 										f"Error in {name}\n{link}", str(e), "error_2")))
@@ -1104,13 +1209,20 @@ class Downloader:
 										type = "video"
 									)
 									response = request.execute()
+									if not response["items"]:
+										self._bot.loop.create_task(msg.channel.send("No alternative video found!"))
+										continue
 									try:
-										dur = track_data["data"]["duration"]-30 if track_data and len(url) < 30 else 60 * 5
+										if track_data and len(url) >= 30:
+											dur = track_data["data"]["duration"] - datetime.timedelta(seconds = 30)
+										else:
+											dur = datetime.timedelta(seconds = 60 * 5)
 										new_url = u.to_yt_url("v", response["items"][0]["id"]["videoId"])
 										content = f"{new_data.get('author').mention}\nDo you want to add {new_url} instead?"
-										content += f"\nTime left to decide: <t:{datetime.datetime.now(datetime.UTC) + dur}:R>"
+										x = int((datetime.datetime.now(datetime.UTC) + dur).timestamp())
+										content += f"\nTime left to decide: <t:{x}:R>"
 										check_msg = asyncio.run_coroutine_threadsafe(
-											msg.channel.send(content),
+											msg.channel.send(content, delete_after = dur.total_seconds() + 30),
 											self._bot.loop
 										).result()
 										
@@ -1119,7 +1231,7 @@ class Downloader:
 											self._bot.loop
 										)
 										
-										if future.result(timeout = dur) == "✅":
+										if future.result(timeout = dur.seconds) == "✅":
 											func = (lambda save_url = new_url: clean(
 												self._ytdl.extract_info(save_url, download = False)))
 											data = func()
@@ -1130,12 +1242,32 @@ class Downloader:
 											if len(url) < 30:
 												results.append(track_data)
 											else:
-												self._player.add(track_data)
+												self._player.add(track_data, new)
+											db.db.get_collection("Playlists").find_one_and_update(
+												{
+													"user": new_data["author"].id,
+													"name": playlist_name
+												}, {
+													"$addToSet": {
+														"songs": [new_url, data["title"]]
+													}
+												}
+											)
+											db.db.get_collection("Playlists").find_one_and_update(
+												{
+													"user": new_data["author"].id,
+													"name": playlist_name
+												}, {
+													"$pull": {
+														"songs": el
+													}
+												}
+											)
 									
 									except TimeoutError:
 										self._bot.loop.create_task(msg.channel.send("You took too long, continuing!"))
-									except KeyError:
-										pass
+									except KeyError as e:
+										print(e, e.__traceback__.tb_lineno)
 									except Exception as e:
 										print(e, e.__traceback__.tb_lineno)
 								
@@ -1150,13 +1282,14 @@ class Downloader:
 						if len(url) < 30:
 							results.append(track_data)
 						else:
-							self._player.add(track_data, True)
+							self._player.add(track_data, new, True)
 						# print(datetime.datetime.now() - now)
 					else:  # execute when every song has been added to result list
 						if len(url) < 30:
-							self._player.add_multiple(results)
+							self._player.add_multiple(results, new)
 						if self._data.get("type") == "default":
 							update_msg(msg, "Done", "", "ok")
+						self._player.switch_queues(self._player, new)
 						if self._lock.locked():
 							self._lock.release()
 						continue
@@ -1217,6 +1350,7 @@ class MusicManager:
 			print("waiting")
 			try:
 				data: dict = self._queue.get()
+				print("in music manager:", data)
 				if not data:
 					break
 				
@@ -1244,7 +1378,7 @@ class MusicManager:
 						"queue": q,
 						"player": player
 					})
-					threading.Thread(target = Downloader, kwargs = data).start()
+					Downloader(**data).start()
 			except Exception as e:
 				print("".join(traceback.format_tb(e.__traceback__)), repr(e), file = sys.stderr)
 		print(self, "stopped!")

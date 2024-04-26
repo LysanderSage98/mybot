@@ -78,7 +78,7 @@ class Markdown(str):
 	@classmethod
 	def _quote(cls, s):
 		parts = s.split("\n")
-		return "> " + "> ".join(parts)
+		return "> " + "\n> ".join(parts)
 
 	@classmethod
 	def _snippet(cls, s):
@@ -92,69 +92,147 @@ class Markdown(str):
 	def _underline(cls, s):
 		return f"__{s}__"
 
-	bo = _bold
-	cb = _codeblock
-	hb = _header_big
-	hm = _header_medium
-	hs = _header_small
-	it = _italic
-	l1 = _list_1
-	l2 = _list_2
-	qu = _quote
-	st = _strikethrough
-	sn = _snippet
-	un = _underline
+	@classmethod
+	def __time(cls, s):
+		assert isinstance(s, int) or isinstance(s, float)
+		return f"<t:{int(s)}"
+	
+	@classmethod
+	def _time_default(cls, s):
+		return cls.__time(s) + ">"
+		
+	@classmethod
+	def _time_short(cls, s):
+		return cls.__time(s) + ":t>"
+		
+	@classmethod
+	def _time_long(cls, s):
+		return cls.__time(s) + ":T>"
+		
+	@classmethod
+	def _date_short(cls, s):
+		return cls.__time(s) + ":d>"
+		
+	@classmethod
+	def _date_long(cls, s):
+		return cls.__time(s) + ":D>"
+		
+	@classmethod
+	def _time_date_short(cls, s):
+		return cls.__time(s) + ":f>"
+		
+	@classmethod
+	def _time_date_long(cls, s):
+		return cls.__time(s) + ":F>"
+		
+	@classmethod
+	def _time_relative(cls, s):
+		return cls.__time(s) + ":R>"
+		
+	bo_ = _bold
+	cb_ = _codeblock
+	hb_ = _header_big
+	hm_ = _header_medium
+	hs_ = _header_small
+	it_ = _italic
+	l1_ = _list_1
+	l2_ = _list_2
+	qu_ = _quote
+	st_ = _strikethrough
+	sn_ = _snippet
+	un_ = _underline
+	
+	td_ = _time_default
+	ts_ = _time_short
+	tl_ = _time_long
+	ds_ = _date_short
+	dl_ = _date_long
+	tds = _time_date_short
+	tdl = _time_date_long
+	tr_ = _time_relative
 
 	def __init__(self, s = ""):
 		super().__init__()
 		self.s = s
 
 	def bold(self):
-		self.s = self.bo(self.s)
+		self.s = self.bo_(self.s)
 		return self
 
 	def codeblock(self):
-		self.s = self.cb(self.s)
+		self.s = self.cb_(self.s)
 		return self
 
 	def header_big(self):
-		self.s = self.hb(self.s)
+		self.s = self.hb_(self.s)
 		return self
 
 	def header_medium(self):
-		self.s = self.hm(self.s)
+		self.s = self.hm_(self.s)
 		return self
 
 	def header_small(self):
-		self.s = self.hs(self.s)
+		self.s = self.hs_(self.s)
 		return self
 
 	def italic(self):
-		self.s = self.it(self.s)
+		self.s = self.it_(self.s)
 		return self
 
 	def list_1(self):
-		self.s = self.l1(self.s)
+		self.s = self.l1_(self.s)
 		return self
 
 	def list_2(self):
-		self.s = self.l2(self.s)
+		self.s = self.l2_(self.s)
 		return self
 
 	def quote(self):
-		self.s = self.cb(self.qu)
+		self.s = self.qu_(self.s)
 		return self
 
 	def snippet(self):
-		self.s = self.sn(self.s)
+		self.s = self.sn_(self.s)
 		return self
 
 	def strikethrough(self):
-		self.s = self.st(self.s)
+		self.s = self.st_(self.s)
 		return self
 
 	def underline(self):
-		self.s = self.un(self.s)
+		self.s = self.un_(self.s)
+		return self
+	
+	def time_default(self):
+		self.s = self.td_(self.s)
+		return self
+	
+	def time_short(self):
+		self.s = self.ts_(self.s)
+		return self
+	
+	def time_long(self):
+		self.s = self.tl_(self.s)
+		return self
+	
+	def date_short(self):
+		self.s = self.ds_(self.s)
+		return self
+	
+	def date_long(self):
+		self.s = self.dl_(self.s)
+		return self
+	
+	def time_date_short(self):
+		self.s = self.tds(self.s)
+		return self
+	
+	def time_date_long(self):
+		self.s = self.tdl(self.s)
+		return self
+	
+	def time_relative(self):
+		self.s = self.tr_(self.s)
 		return self
 
 	def __repr__(self):
@@ -247,13 +325,14 @@ def reformat(data: dict):
 				if key in insert:
 					temp = walk_list(val, key)
 					for el in temp:
-						for key_inner, val_inner in el.items():
+						for key_inner, val_inner in list(el.items()):
 							if not res.get(key_inner):
 								res[key_inner] = {
 									"type": val_inner,
 								}
 								res[key_inner].update(el)
 								res[key_inner].pop(key_inner)
+								temp.remove(el)
 								break
 				elif key == "choice":
 					if not to_insert:
@@ -522,7 +601,7 @@ async def add_cmd(channel, resp, data, perm, to_add):
 		_data = reformat(usage_data)
 		print(json.dumps(_data, indent = 2, default = lambda x: x.__name__))
 
-		desc += f"\n\t{Markdown.cb('')}" + "py\n\t"
+		desc += f"\n\t{Markdown.cb_('')}" + "py\n\t"
 		slash_data = ReprDict()
 		val: dict[str, typing.Any]
 		for key, val in _data.items():
@@ -641,7 +720,7 @@ async def add_cmd(channel, resp, data, perm, to_add):
 		)
 		print(cmd_template)
 	except KeyError as e:
-		err = f'{Markdown.cb(e.__repr__())}\n{Markdown.cb("".join(traceback.format_tb(e.__traceback__)))}'
+		err = f'{Markdown.cb_(e.__repr__())}\n{Markdown.cb_("".join(traceback.format_tb(e.__traceback__)))}'
 		return err
 	if await approve_cmd(data.bot, data.command, cmd_template):
 		open(path, "w").write(cmd_template)
@@ -693,7 +772,7 @@ async def approve_alt(bot, cmd_name, cmd_alt):
 async def approve_cmd(bot, new_cmd, template):
 	embed = bot.responder.emb_resp(
 		f"Request to add the new command {new_cmd}",
-		desc = Markdown.cb("py\n" + template),
+		desc = Markdown.cb_("py\n" + template),
 		color = bot.responder.info
 	)
 	res = await approve(bot, embed)
@@ -842,7 +921,7 @@ async def cmd_adder_ui(data: Result):
 				coll.delete_one({"name": data.command})
 				await details.followup.send(
 					embed = client.responder.emb_resp2(
-						Markdown.cb("".join(traceback.format_tb(ex.__traceback__)) + repr(ex))
+						Markdown.cb_("".join(traceback.format_tb(ex.__traceback__)) + repr(ex))
 					)
 				)
 			else:
@@ -858,6 +937,7 @@ async def cmd_adder_ui(data: Result):
 			label = "Description",
 			required = True,
 			custom_id = "desc",
+			max_length = 100,
 			style = discord.TextStyle.long))
 		modal.add_item(discord.ui.TextInput(
 			label = "Usage",
@@ -884,7 +964,7 @@ async def cmd_adder_ui(data: Result):
 	view.children[-1].callback = no
 	await channel.send(
 		embed = resp.emb_resp(
-			f"Command {Markdown.sn(data.command)} not found!",
+			f"Command {Markdown.sn_(data.command)} not found!",
 			"Do you want to add it?",
 			color = "error"),
 		view = view,

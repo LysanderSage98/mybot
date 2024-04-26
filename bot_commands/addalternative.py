@@ -40,7 +40,7 @@ async def addalternative(data: Result):
 			coll.update_one({"name": cmd_name}, {"$addToSet": {"aliases": alt_name}})
 			embed = data.bot.responder.emb_resp(
 				"Done!",
-				f"Added {Md.sn(alt_name)} as alternative name to {Md.sn(cmd_name)}",
+				f"Added {Md.sn_(alt_name)} as alternative name to {Md.sn_(cmd_name)}",
 				"ok"
 			)
 		else:
@@ -51,13 +51,13 @@ async def addalternative(data: Result):
 	elif cmd:
 		embed = data.bot.responder.emb_resp(
 			"Failed to Complete!",
-			f"Not allowed to modify {Md.sn(cmd_name)}!",
+			f"Not allowed to modify {Md.sn_(cmd_name)}!",
 			"error"
 		)
 	else:
 		embed = data.bot.responder.emb_resp(
 			"Failed to Complete!",
-			f"{Md.sn(cmd_name)} couldn't be found",
+			f"{Md.sn_(cmd_name)} couldn't be found",
 			"error"
 		)
 

@@ -1,4 +1,7 @@
+import datetime
+
 import discord
+
 from helpers.other import db_stuff as db
 
 
@@ -11,34 +14,40 @@ def typing_handler(channel, user, when, client):
 		print(e)
 		
 
-async def voice_state_handler(member, before, after, client):
-	if member == client.user:
+async def voice_state_handler(member, before, after, bot):
+	if member == bot.user:
 		return
-	print(member, before, end = "")
 	coll = db.db.get_collection("User")
+	user = coll.find_one({"id": member.id})
+	print(user)
 	
 	if before.channel is None:
-		print(" no channel change")
 		coll.update_one({"id": member.id}, {"$set": {"channel": after.channel.id}}, upsert = True)
 	
 	elif after.channel != before.channel and after.channel is not None:
-		# print([log async for log in member.guild.audit_logs()])
-		channel = client.get_channel(coll.find_one({"id": member.id})["channel"])
+		channel = bot.get_channel(user["channel"])
 		
-		if after.channel == channel:
-			print(" pass")
+		if not channel:
+			coll.update_one({"id": member.id}, {"$set": {"channel": after.channel.id}})
 			return
 		
-		elif not coll.find_one({"id": member.id, "move": True}):
-			print(" disabled")
+		if after.channel == channel:
+			return
+		
+		elif not user.get("re-move"):
+			coll.update_one({"id": member.id}, {"$set": {"channel": after.channel.id}}, upsert = True)
 			return
 		
 		else:
-			print(" move!")
-			print(after)
 			try:
 				await member.move_to(before.channel)
 			except (discord.HTTPException, TypeError):
 				pass
 	else:
-		print(" pass")
+		members = before.channel.members
+		members = list(filter(lambda x: not x.bot, members))
+		v_c = before.channel.guild.voice_client
+		if (
+			not members or len(list(filter(lambda x: x.voice.self_deaf or x.voice.deaf, members))) == len(members)
+		) and v_c and v_c.is_playing():
+			v_c.pause()

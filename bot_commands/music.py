@@ -17,11 +17,25 @@ from modules import music as m
 
 
 def get_instance(channel, bot, vc, author):
+	if not vc:
+		return None
 	_id = vc.id
 	if not (instance := music_instances.get(_id)):
 		instance = MusicCommands(channel, bot, vc, author)
 		music_instances[_id] = instance
+	else:
+		instance.author = author
 	return instance
+
+
+def get_arg(i: int, val: str, d: dict):
+	idx = str(i)
+	temp = d.pop(
+		val,
+		d.pop(idx) if d.get(idx) == val else "")
+	if temp:
+		i += 1
+	return i, temp
 
 
 class MusicCommands:
@@ -91,7 +105,7 @@ class MusicCommands:
 
 		else:
 			res = player.del_current(playlist = playlist_name)
-			response = ["Removed", f"{self.md.cb(res['data']['title'])}", "success"]
+			response = ["Removed", f"{self.md.cb_(res['data']['title'])}", "success"]
 		embed: discord.Embed = self.bot.responder.emb_resp(*response)
 		desc = embed.description
 
@@ -120,7 +134,7 @@ class MusicCommands:
 		return embed
 
 	async def move(self, **kwargs):
-		pass
+		pass  # todo
 
 	async def nowplaying(self):
 		coll = db.db.get_collection("Playlists")
@@ -135,12 +149,12 @@ class MusicCommands:
 
 		passed = {
 			"name": "Time passed since start",
-			"value": self.md.cb(time_passed),
+			"value": self.md.cb_(time_passed),
 			"inline": False
 		}
 		dur = {
 			"name": "Duration",
-			"value": self.md.cb(data['duration']),
+			"value": self.md.cb_(data['duration']),
 			"inline": False
 		}
 		ffmpeg_info = data["ffmpeg_options"]
@@ -152,50 +166,50 @@ class MusicCommands:
 			ending_point = re.search(r"-to (\S*)", times).group(1)
 			start = {
 				"name": "Starting point in the track",
-				"value": self.md.cb(starting_point)
+				"value": self.md.cb_(starting_point)
 			}
 			end = {
 				"name": "Ending point in the track",
-				"value": self.md.cb(ending_point)
+				"value": self.md.cb_(ending_point)
 			}
 			embed.add_field(**start).add_field(**end)
 		if thumbnail:
 			embed.set_thumbnail(url = thumbnail)
 
 		embed.add_field(name = "Buffer progress", value = data["buffer_status"])
-		msg = await self.channel.send(embed = embed)
+		# msg = await self.channel.send(embed = embed, delete_after = 60)
 
-		def check1(check_reaction, check_user):
-			return check_user == self.author and check_reaction.message.id == msg.id
+		async def check(interaction: discord.Interaction):
+			return interaction.user == self.author
+		
+		async def timeout():
+			view.stop()
+			view.clear_items()
+		
+		# def check1(check_reaction, check_user):
+		# 	return check_user == self.author and check_reaction.message.id == msg.id
 
-		def check2(check_message: discord.Message):
-			c_1 = check_message.author == self.author
-			c_2 = check_message.channel == self.channel
-			c_3 = not check_message.content.startswith(self.bot.prefix)
-			return c_1 and c_2 and c_3
-
-		await msg.add_reaction("➕")
-		await msg.add_reaction("➖")
-
-		while True:
-			try:
-				reaction, user = await self.bot.wait_for("reaction_add", check = check1, timeout = 60)
-			except asyncio.exceptions.TimeoutError:
-				break
-
-			info_msg = await self.channel.send("Type the name of the playlist you want to modify!")
-			try:
-				playlist_name_msg = await self.bot.wait_for("message", check = check2, timeout = 60)
-				playlist_name = playlist_name_msg.content
-				await playlist_name_msg.delete(delay = 20)
-				await info_msg.delete(delay = 20)
-			except asyncio.exceptions.TimeoutError:
-				await info_msg.edit(content = "Timed out!")
-				await info_msg.delete(delay = 20)
-				continue
-			if reaction.emoji == "➕":
-				response = f"Added{data['title']} to playlist {self.md.sn(playlist_name)}!"
-				try:
+		# def check2(check_message: discord.Message):
+		# 	c_1 = check_message.author == self.author
+		# 	c_2 = check_message.channel == self.channel
+		# 	c_3 = not check_message.content.startswith(self.bot.prefix)
+		# 	return c_1 and c_2 and c_3
+		
+		view = discord.ui.View(timeout = 60)
+		view.add_item(discord.ui.Button(emoji = "➕"))
+		view.add_item(discord.ui.Button(emoji = "➖"))
+		# await msg.add_reaction("➕")
+		# await msg.add_reaction("➖")
+		
+		async def modify(interaction: discord.Interaction, add: bool):
+			view.stop()
+			await interaction.message.delete()
+			
+			async def handler(details: discord.Interaction):
+				playlist_name = details.data["components"][0]["components"][0]["value"]
+				user = details.user
+				if add:
+					response = f"Added{data['title']} to playlist {self.md.sn_(playlist_name)}!"
 					coll.find_one_and_update(
 						{
 							"user": user.id,
@@ -206,24 +220,91 @@ class MusicCommands:
 							}
 						}, upsert = True
 					)
-				except Exception as e:
-					print(e)
-			elif reaction.emoji == "➖":
-				response = f"Removed {data['title']} from playlist {self.md.sn(playlist_name)}"
-				coll.find_one_and_update(
-					{
-						"user": user.id,
-						"name": playlist_name
-					}, {
-						"$pull": {
-							"songs": (data['link'], data['title'])
-						}
-					}, upsert = True
-				)
-			else:
-				continue
-			await self.channel.send(embed = self.bot.responder.emb_resp("Info", response, "success"), delete_after = 10)
+				else:
+					response = f"Removed {data['title']} from playlist {self.md.sn_(playlist_name)}"
+					coll.find_one_and_update(
+						{
+							"user": user.id,
+							"name": playlist_name
+						}, {
+							"$pull": {
+								"songs": (data['link'], data['title'])
+							}
+						}, upsert = True
+					)
+			
+				await details.followup.send(embed = self.bot.responder.emb_resp("Info", response, "success"), delete_after = 10)
+			
+			# print(details)
 
+		# while True:
+			# try:
+			# 	reaction, user = await self.bot.wait_for("reaction_add", check = check1, timeout = 60)
+			# except asyncio.exceptions.TimeoutError:
+			# 	break
+
+			# info_msg = await self.channel.send("Type the name of the playlist you want to modify!")
+			modal = discord.ui.Modal(title = "Add song to playlist" if add else "Remove song from playlist")
+			modal.on_submit = handler
+			modal.add_item(discord.ui.TextInput(
+				label = "Name of the playlist you want to modify",
+				required = True))
+			try:
+				# playlist_name_msg = await self.bot.wait_for("message", check = check2, timeout = 60)
+				# playlist_name = playlist_name_msg.content
+				# await playlist_name_msg.delete(delay = 20)
+				# await info_msg.delete(delay = 20)
+				await interaction.response.send_modal(modal)
+			# except asyncio.exceptions.TimeoutError:
+			# 	await info_msg.edit(content = "Timed out!")
+			# 	await info_msg.delete(delay = 20)
+			# 	continue
+			except Exception as e:
+				txt = f"{repr(e)}\n{''.join(traceback.format_tb(e.__traceback__))}"
+				await interaction.channel.send(embed = self.bot.responder.emb_resp2(txt))
+			# if reaction.emoji == "➕":
+			# 	response = f"Added{data['title']} to playlist {self.md.sn_(playlist_name)}!"
+			# 	try:
+			# 		coll.find_one_and_update(
+			# 			{
+			# 				"user": user.id,
+			# 				"name": playlist_name
+			# 			}, {
+			# 				"$addToSet": {
+			# 					"songs": (data["link"], data["title"])
+			# 				}
+			# 			}, upsert = True
+			# 		)
+			# 	except Exception as e:
+			# 		print(e)
+			# elif reaction.emoji == "➖":
+			# 	response = f"Removed {data['title']} from playlist {self.md.sn_(playlist_name)}"
+			# 	coll.find_one_and_update(
+			# 		{
+			# 			"user": user.id,
+			# 			"name": playlist_name
+			# 		}, {
+			# 			"$pull": {
+			# 				"songs": (data['link'], data['title'])
+			# 			}
+			# 		}, upsert = True
+			# 	)
+			# else:
+			# 	continue
+			# await self.channel.send(embed = self.bot.responder.emb_resp("Info", response, "success"), delete_after = 10)
+		
+		async def a(interaction):
+			await modify(interaction, True)
+
+		async def r(interaction):
+			await modify(interaction, False)
+		
+		view.interaction_check = check
+		view.on_timeout = timeout
+		view.children[-2].callback = a
+		view.children[-1].callback = r
+		await self.channel.send(embed = embed, view = view, delete_after = 60)
+	
 	async def pause(self):
 		if not self.voice_client.is_paused():
 			embed = self.bot.responder.emb_resp("Paused!")
@@ -240,18 +321,32 @@ class MusicCommands:
 		print(self.voice_client)
 
 		msg = await self.channel.send(embed = self.bot.responder.emb_resp("Searching!", "", "info"))
+		idx = 1
+		res = []
+		for el in ["new", "playlist", "stored", "shuffle"]:
+			idx, temp = get_arg(idx, el, kwargs)
+			res.append(temp)
+			
+		new, playlist, stored, shuffle = res
+		
+		# new = kwargs.pop(
+		# 	"new",
+		# 	kwargs.pop(str(idx)) if kwargs.get(str(idx)) == "new" else "")
 
-		playlist = kwargs.pop(
-			"playlist",
-			kwargs.pop("1") if kwargs.get("1") == "playlist" else ""
-		).replace("playlist", "&sp=EgIQAw%253D%253D")
-		stored = kwargs.pop(
-			"stored",
-			kwargs.pop("2") if kwargs.get("2") == "stored" else ""
-		)
-		shuffle = kwargs.pop(
-			"shuffle",
-			kwargs.pop("3") if kwargs.get("3") == "shuffle" else "")
+		# playlist = kwargs.pop(
+		# 	"playlist",
+		# 	kwargs.pop("2") if kwargs.get("2") == "playlist" else ""
+		# )
+
+		# stored = kwargs.pop(
+		# 	"stored",
+		# 	kwargs.pop("3") if kwargs.get("3") == "stored" else ""
+		# )
+
+		# shuffle = kwargs.pop(
+		# 	"shuffle",
+		# 	kwargs.pop("4") if kwargs.get("4") == "shuffle" else "")
+
 		# noinspection PyTypeChecker
 		search = kwargs.get(
 			"search",
@@ -303,7 +398,8 @@ class MusicCommands:
 			"play_all": play_all,
 			"msg": msg,
 			"type": "default",
-			"sh": shuffle
+			"sh": shuffle,
+			"new": True if new else False
 		}
 		m.MusicManager.put(data)
 
@@ -335,7 +431,7 @@ class MusicCommands:
 				text = list(map(lambda x: f"\n[{x[0] + count * 10}] {transform(x[1])}", enumerate(lis, start = 1)))
 				q = f"{discord.utils.escape_markdown(''.join(text))}"
 				emb: discord.Embed = self.bot.responder.emb_resp(f"Page {count + 1}/{math.ceil(len(items) / 10) or 1}")
-				emb.set_author(name = f"Size: {len(items)}")
+				emb.set_author(name = f"Size: {len(items)} + 1")
 				emb.add_field(name = "Currently Playing", value = f"[0] {current}", inline = False)
 				emb.add_field(name = f"Queue ({queue_duration})", value = q, inline = False) if q else None
 				emb.set_footer(text = f"🔁 Loop: {loop_value}")
@@ -422,6 +518,90 @@ class MusicCommands:
 			if toggle:
 				await msg.edit(embed = await embed(get_short()))
 		await msg.clear_reactions()
+	
+	async def queues(self, *, msg = None, **kwargs):
+		switch = kwargs.get("switch", int(kwargs.get("1", 0)))
+		if switch:
+			res = m.Player.switch_queues(self.channel.guild.id, switch)
+			if not res:
+				return self.bot.responder.emb_resp("No player found")
+			elif res == -1:
+				return self.bot.responder.emb_resp("No matching queue found")
+			await self.channel.send(f"Switched to queue {switch}!")
+		res = m.Player.get_queues_info(self.channel.guild.id)
+		if not res:
+			return self.bot.responder.emb_resp("No player found")
+		all_queues, queue = res
+		
+		# if not all_items:
+		# 	return self.bot.responder.emb_resp("Queue is empty")
+		
+		def transform(*data):
+			return f"Queue: {data[0]}, Track-Count: {data[1]}"
+		
+		current = transform(queue, all_queues.pop(queue))
+		items = list(all_queues.items())
+		count = 0
+		
+		def get_short():
+			return items[count * 10:(count + 1) * 10]
+		
+		async def embed(lis):
+			try:
+				text = "".join(map(lambda x: f"\n{transform(*x)}", lis))
+				emb: discord.Embed = self.bot.responder.emb_resp(f"Page {count + 1}/{math.ceil(len(items) / 10) or 1}")
+				emb.set_author(name = f"Queues: {len(items)} + 1")
+				emb.add_field(name = "Current", value = current, inline = False)
+				emb.add_field(name = "Other Queues", value = text, inline = False) if text else None
+			except Exception as embed_error:
+				print("".join(traceback.format_tb(embed_error.__traceback__)), repr(embed_error), file = sys.stderr)
+				txt = f"{repr(embed_error)}\n{traceback.format_tb(embed_error.__traceback__)[-1]}"
+				return self.bot.responder.emb_resp2(txt)
+			return emb
+		
+		try:
+			if isinstance(msg, discord.Interaction):
+				msg = await msg.followup.send(embed = await embed(get_short()))
+			else:
+				msg = await self.channel.send(embed = await embed(get_short()))
+		except Exception as e:
+			print(e)
+			return self.bot.responder.emb_resp2("Can't fit the queue in one message, something went wrong")
+		
+		if len(items) > 10:
+			await msg.add_reaction("⬅️")
+			await msg.add_reaction("➡️")
+		
+		def check(check_reaction, check_user):
+			return check_user == self.author and check_reaction.message.id == msg.id
+		
+		while True:
+			toggle = False
+			try:
+				reaction, user = await self.bot.wait_for("reaction_add", check = check, timeout = 60.0)
+			except asyncio.exceptions.TimeoutError:
+				break
+			
+			if reaction.emoji == "➡️":
+				toggle = True
+				count += 1
+				if count >= (math.ceil(len(items) / 10)):
+					count = 0
+			
+			elif reaction.emoji == "⬅️":
+				toggle = True
+				count -= 1
+				if count < 0:
+					count = math.ceil(len(items) / 10) - 1
+			
+			if toggle:
+				await msg.edit(embed = await embed(get_short()))
+		await msg.clear_reactions()
+	
+	async def seek(self, *, msg = None, **kwargs):
+		amount = int(kwargs.get("seek", kwargs.get("1", 0)))
+		m.Player.get_player(self.channel.guild.id).seek(amount)
+		await msg.delete()
 
 	async def skip(self, **kwargs):
 		amount = kwargs.get("skip", kwargs.get("1"))
@@ -544,16 +724,21 @@ class MusicCommands:
 			'stop',
 			'join',
 			"queue",
+			"queues",
 			"deletesong",
-			"showplaylist"
+			"showplaylist",
+			"seek"
 		]],
 		"playlist": typing.Optional[typing.Literal['playlist']],
 		"skip": typing.Optional[int],
 		"loop": typing.Optional[str],
 		"src": typing.Optional[int],
-		"to": typing.Optional[int],
+		"dst": typing.Optional[int],
+		"switch": typing.Optional[int],
+		"seek": typing.Optional[int],
 		"stored": typing.Optional[typing.Literal['stored']],
 		"shuffle": typing.Optional[typing.Literal['shuffle']],
+		"new": typing.Optional[typing.Literal["new"]],
 		"search": typing.Optional[str]
 	}
 )
@@ -563,19 +748,25 @@ async def music(data: Result):
 	arg0: typing.Literal
 		functionality
 	playlist: typing.Literal
-		search query will be a playlist - only used with play functionality
+		search query will be a playlist - only used with 'play' functionality
 	skip: int
-		amount of songs to skip - only used with skip functionality
+		amount of songs to skip - only used with 'skip' functionality
 	loop: str
-		loop setting - only used with loop functionality
+		loop setting - only used with 'loop' functionality
 	src: int
-		current song position - only used with move functionality
+		current song position - only used with 'move' functionality
 	dst: int
-		target song position - only used with move functionality
+		target song position - only used with 'move' functionality
+	switch: int
+		the id of the queue you want to switch to - only used with 'queues' functionality
+	seek: int
+		the amount of seconds to skip for- or backward in the current track - only used with 'seek' functionality
 	stored: typing.Literal
-		do not search for playlist name on youtube, use a saved one in the bot - only used with play functionality
+		do not search for playlist name on youtube, use a saved one in the bot - only used with 'play' functionality
 	shuffle: typing.Literal
-		auto-shuffle the playlist that you are about the add - only used with play functionality
+		auto-shuffle the registered playlist that you are about the add - only used with 'play' functionality
+	new: typing.Literal
+		make a new queue and add to that one - only used with 'play' functionaliry
 	search: str
 		song-link or playlist-link / -name – used with 'play' and 'showplaylist' functionality
 	"""

@@ -39,7 +39,7 @@ async def help(data: Result):
 	found = cmds.find({"$or": [{"name": single}, {"aliases": single}]} if single else None)
 
 	if not found:
-		embed.title = f"Command {Md.sn(single)} not found!"
+		embed.title = f"Command {Md.sn_(single)} not found!"
 		embed.color = data.bot.responder.colors["error"]
 
 	elif single:
@@ -49,19 +49,19 @@ async def help(data: Result):
 
 		embed.add_field(
 			name = "Aliases (only relevant for non-slash usage)",
-			value = Md.sn(", ".join(cmd["aliases"])) if cmd["aliases"] else "None",
+			value = Md.sn_(", ".join(cmd["aliases"])) if cmd["aliases"] else "None",
 			inline = False)
 		embed.add_field(
 			name = "Description",
-			value = Md.cb("py\n" + desc),
+			value = Md.cb_("py\n" + desc),
 			inline = False)
 		embed.add_field(
 			name = "Usage",
-			value = Md.cb(u.Format().format(usage, prefix = data.prefix)),
+			value = Md.cb_(u.Format().format(usage, prefix = data.prefix)),
 			inline = False)
 		embed.add_field(
 			name = "Usage example",
-			value = Md.cb(cmd["usage_ex"].format(prefix = data.prefix)) if cmd["usage_ex"] else "None",
+			value = Md.cb_(cmd["usage_ex"].format(prefix = data.prefix)) if cmd["usage_ex"] else "None",
 			inline = False)
 		embed.set_author(
 			name = f'added by {cmd["added_by"]["name"]} on {datetime.datetime.fromtimestamp(cmd["added_on"])} UTC',
@@ -71,7 +71,9 @@ async def help(data: Result):
 		out = "```"
 		for cmd in found:
 			if PermHierarchy.classes[cmd["permission"]] <= data.user[1]:
-				out += f"- {cmd['name']}\n"
+				aliases = cmd['aliases']
+				aliases = f" ({', '.join(aliases)})" if aliases else ''
+				out += f"- {cmd['name']}{aliases}\n"
 		out += "```"
 		embed.description = out
 
