@@ -4,20 +4,21 @@ class Datatypes:
 	"""
 	bigint = "INTEGER"
 	# bigserial = "BIGSERIAL"
-	bit = (lambda x = 80: f"VARBIT({x if type(x) == int else 80})")
+	bit = (lambda x = 80: f"VARBIT({x if isinstance(x, int) else 80})")
 	bit_varying = bit
 	blob = "BLOB"
 	bool = "BOOLEAN"
-	char = (lambda x = 80: f"CHARACTER({x if type(x) == int else 80})")
+	char = (lambda x = 80: f"CHARACTER({x if isinstance(x, int) else 80})")
 	character = char
-	character_varying = (lambda x: f"VARCHAR({x if x and type(x) == int else 80})")
+	character_varying = (lambda x: f"VARCHAR({x if x and isinstance(x, int) else 80})")
 	date = "DATE"
-	decimal = (lambda x = 0, y = 0: f"DECIMAL({f'{abs(x)}, {abs(y)}' if type(x) == int and y and type(y) == int else f'{abs(x) if type(x) == int else 0}'})")
-	float = (lambda x: f"FLOAT{f'({x})' if x and type(x) == int else ''}")
+	decimal = (lambda x = 0, y = 0: f"DECIMAL({f'{abs(x)}, {abs(y)}' if isinstance(x, int) and y and isinstance(y, int) else f'{abs(x) if isinstance(x, int) else 0}'})")
+	float = (lambda x: f"FLOAT{f'({x})' if x and isinstance(x, int) else ''}")
 	int = "INT4"
 	int2 = "INT2"
 	int4 = int
 	int8 = bigint
+	Int64 = bigint
 	integer = int
 	numeric = decimal
 	str = "TEXT"
@@ -41,7 +42,7 @@ class Domain:
 		self._pprint = False
 		
 	def pretty_print(self, val: bool):
-		if type(val) == bool:
+		if isinstance(val, bool):
 			self._pprint = val
 		return self
 	
@@ -49,14 +50,14 @@ class Domain:
 		return self._name
 	
 	def set_datatype(self, name: str):
-		if type(name) == str:
+		if isinstance(name, str):
 			self._datatype = name
 		else:
 			raise RuntimeError(f"Needs to be a string, not {name.__class__}!")
 		return self
 	
 	def set_default(self, default: str):
-		if type(default) == str:
+		if isinstance(default, str):
 			self._default = f"{default.__repr__()}"
 		else:
 			raise RuntimeError(f"Needs to be a string, not {default.__class__}!")
@@ -66,7 +67,7 @@ class Domain:
 		"""
 		Needs the part in the parentheses
 		"""
-		if type(check) == str:
+		if isinstance(check, str):
 			self._check = check
 		else:
 			raise RuntimeError(f"Needs to be a string, not {check.__class__}!")
@@ -96,6 +97,10 @@ class Table:
 		self._columns = {}
 		self._foreign_keys = {}
 		self.init = True
+		
+	def clear(self):
+		self._columns.clear()
+		self._foreign_keys.clear()
 	
 	def _add_datatype(self, name, datatype, primary_key):
 		if name.startswith("_"):
@@ -208,7 +213,7 @@ class Table:
 		Gleitkommazahl mit optionaler Genauigkeit von 1 bis 15
 		"""
 		datatype = "FLOAT"
-		if genauigkeit and type(genauigkeit) == int:
+		if genauigkeit and isinstance(genauigkeit, int):
 			genauigkeit = min(max(1, genauigkeit), 15)
 			datatype += f"({genauigkeit})"
 		self._add_datatype(name, datatype, primary_key)
@@ -225,6 +230,8 @@ class Table:
 	put_text = put_str
 
 	put_integer = put_int
+	
+	put_int64 = put_int
 	
 	def put_time(self, name: str, primary_key = False):
 		"""
@@ -294,7 +301,7 @@ class Table:
 			append = ""
 		out = f"CREATE TABLE {self._name} (" + append
 		for name, _type in items:
-			if type(_type) == tuple:
+			if isinstance(_type, tuple):
 				_type, name = _type
 			out += f"{name} {_type}, " + append
 		for foreign_key in self._foreign_keys:
