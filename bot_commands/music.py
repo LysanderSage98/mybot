@@ -203,7 +203,7 @@ class MusicCommands:
 		
 		async def modify(interaction: discord.Interaction, add: bool):
 			view.stop()
-			await interaction.message.delete()
+			# await interaction.message.delete()
 			
 			async def handler(details: discord.Interaction):
 				playlist_name = details.data["components"][0]["components"][0]["value"]
@@ -233,7 +233,11 @@ class MusicCommands:
 						}, upsert = True
 					)
 			
-				await details.followup.send(embed = self.bot.responder.emb_resp("Info", response, "success"), delete_after = 10)
+				emb = self.bot.responder.emb_resp("Info", response, "success")
+				await details.response.send_message(embed = emb, ephemeral = True)
+				await interaction.message.delete()
+
+			# await interaction.message.delete()
 			
 			# print(details)
 
@@ -262,6 +266,8 @@ class MusicCommands:
 			except Exception as e:
 				txt = f"{repr(e)}\n{''.join(traceback.format_tb(e.__traceback__))}"
 				await interaction.channel.send(embed = self.bot.responder.emb_resp2(txt))
+				await interaction.message.delete()
+				
 			# if reaction.emoji == "➕":
 			# 	response = f"Added{data['title']} to playlist {self.md.sn_(playlist_name)}!"
 			# 	try:

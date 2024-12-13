@@ -40,9 +40,9 @@ async def comparetime(data: Result):
 		data.error = data.bot.responder.emb_resp("Error", "Not enough arguments given!", "error")  # todo test
 		return data
 	
-	kind = args.pop("arg0", args.pop("0", None))
-	time = args.pop("value", args.pop("1", None))
-	place = args.pop("location1", args.pop("2", None))
+	kind = args.pop("arg0", args.pop("0", ""))
+	time = args.pop("value", args.pop("1", ""))
+	place = args.pop("location1", args.pop("2", ""))
 	if args:
 		print(args)
 		places = [args.pop(f"location{2 + x}", args.pop(f"{3 + x}", None)) for x in range(len(args))]

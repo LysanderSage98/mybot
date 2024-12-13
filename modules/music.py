@@ -1,4 +1,5 @@
 import asyncio
+import bs4
 import datetime
 import discord
 import googleapiclient.discovery
@@ -906,6 +907,29 @@ class Downloader(threading.Thread):
 	@classmethod
 	def del_downloader(cls, _id):
 		cls._downloaders.pop(_id)
+		
+	@staticmethod
+	def get_video_data_from_url(url: str) -> dict:
+		_id = re.search("(v=|.be/)(.{11})", url).group(2)
+		resp = subprocess.run(["curl", u.to_yt_url("v", _id)], capture_output = True, encoding = "utf-8")
+		if resp.returncode != 0:
+			print(resp.returncode)  # todo send as response
+			print(resp.stderr)  # todo send as response
+			return {}
+		data = bs4.BeautifulSoup(resp.stdout, "html.parser")
+		try:
+			body: bs4.element.Tag = data.find("body")
+			script: bs4.element.Tag = body.find("script")
+			script_text = script.text
+		except Exception as e:
+			print(e)  # todo send as response
+			return {}
+		json_val = re.search("({.*);$", script_text)
+		if json_val is None:
+			print("Regex failed")  # todo send as response
+			return {}
+		parsed = json.loads(json_val.group(1))
+		return parsed
 
 	def __init__(self, **data):
 		super().__init__(name = data["_id"])
@@ -918,11 +942,11 @@ class Downloader(threading.Thread):
 		self._ytdl = ytdl.YoutubeDL({
 			"extractor_args": {
 				"youtube": {
-					"player_client": ["web"]
+					"player_client": ["mweb"]
 				}
 			},
 			"quiet": True,
-			# "verbose": True,
+			"verbose": True,
 			"format": "bestaudio/best",
 			# "ignoreerrors": True,
 			"youtube_include_dash_manifest": False
@@ -961,6 +985,27 @@ class Downloader(threading.Thread):
 			return new_list
 		
 		def clean(d: dict):
+			if not d:
+				return None
+			streaming_data = d["streamingData"]
+			video_details = d["videoDetails"]
+			
+			video_url = u.to_yt_url("v", video_details["videoId"])
+			duration = int(video_details["lengthInSeconds"])
+			# channel = video_details["channelId"]
+			# desc = video_details["shortDescription"]
+			thumbnails = video_url.get("thumbnail", {}).get("thumbnails", {})
+			thumbnails = filter(lambda thumbnail: "webp" not in thumbnail["url"], thumbnails)
+			thumbnails = sorted(thumbnails, key = lambda x: (x.get("height") or 0) * (x.get("width") or 0))
+			
+			check = 5 * 60  # 5 min in seconds
+			try:
+				expiration_time = int(streaming_data["expiresInSeconds"])
+				expired = (lambda: expiration_time - duration - datetime.datetime.now(datetime.UTC).timestamp() < check)
+			except AttributeError:
+				expired = (lambda: True)
+			
+		def clean_ytdl(d: dict):
 			if not d:
 				return None
 			video_url = d.get("url")
@@ -1117,7 +1162,7 @@ class Downloader(threading.Thread):
 	
 				elif "watch" in url:
 					msg = new_data.get("msg")  # sent by bot, so the bot can edit it as well
-					func = (lambda own_url = url: clean(self._ytdl.extract_info(own_url, download = False)))
+					func = (lambda own_url = url: clean_ytdl(self._ytdl.extract_info(own_url, download = False)))
 					try:
 						data = func()
 					except Exception as e:
@@ -1192,7 +1237,7 @@ class Downloader(threading.Thread):
 							link = el
 							name = ""
 
-						func = (lambda save_url = link: clean(self._ytdl.extract_info(save_url, download = False)))
+						func = (lambda save_url = link: clean_ytdl(self._ytdl.extract_info(save_url, download = False)))
 
 						try:
 							data = func()
@@ -1232,7 +1277,7 @@ class Downloader(threading.Thread):
 										)
 										
 										if future.result(timeout = dur.seconds) == "✅":
-											func = (lambda save_url = new_url: clean(
+											func = (lambda save_url = new_url: clean_ytdl(
 												self._ytdl.extract_info(save_url, download = False)))
 											data = func()
 											track_data = {
@@ -1253,16 +1298,16 @@ class Downloader(threading.Thread):
 													}
 												}
 											)
-											db.db.get_collection("Playlists").find_one_and_update(
-												{
-													"user": new_data["author"].id,
-													"name": playlist_name
-												}, {
-													"$pull": {
-														"songs": el
-													}
+										db.db.get_collection("Playlists").find_one_and_update(  # always delete invalid track
+											{
+												"user": new_data["author"].id,
+												"name": playlist_name
+											}, {
+												"$pull": {
+													"songs": el
 												}
-											)
+											}
+										)
 									
 									except TimeoutError:
 										self._bot.loop.create_task(msg.channel.send("You took too long, continuing!"))
