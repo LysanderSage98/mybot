@@ -476,7 +476,11 @@ def parse(string, data, open_stack, ret = False, source = ""):
 				if isinstance(res, list):
 					data["choice"].extend(map(lambda x: x.get("group", x), res))
 				else:
-					data["choice"].append(res.get("group") or res)
+					temp_val = res.get("group") or res
+					if not temp_val:
+						raise ValueError("Got an unexpected empty value when parsing choices!\n"
+							f"Last value successfully parsed was '{list(data['choice'][-1])[0]}'")
+					data["choice"].append(temp_val)
 				if ret:
 					return data["choice"]
 				else:

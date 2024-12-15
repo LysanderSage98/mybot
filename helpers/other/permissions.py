@@ -206,7 +206,6 @@ class Permissions:
 				prefix = guild_settings.get("prefix")
 			else:
 				raise RuntimeError("No guild settings found for guild", guild.name)
-		# print(message)
 		func = commands.get(interaction.data["name"])
 		result = self.__class__.result_object(bot, interaction)
 		result.command = interaction.data["name"]

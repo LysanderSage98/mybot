@@ -24,7 +24,7 @@ class Result:
 
 		self.valid = valid
 		self.bot: Bot = bot
-		self.message: discord.Message = message
+		self.message: discord.Message | discord.Interaction = message
 		self.command: str
 		self.function: typing.Coroutine
 		self.args: dict

@@ -26,7 +26,7 @@ async def interaction_handler(interaction: discord.Interaction, **params):
 	print(params)
 	bot = interaction.client
 	result = await bot.loop.run_in_executor(None, permissions.validate_interaction, interaction, bot)
-	print("interaction handler input\n", result)
+	print("interaction handler result\n", result)
 	if result:
 		await interaction.response.defer()
 		try:

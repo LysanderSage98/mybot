@@ -1219,8 +1219,11 @@ class Downloader(threading.Thread):
 						update_msg(msg, "Estimated time:", str(datetime.timedelta(seconds = len(url))), "info")
 					if new_data.pop("sh", None):
 						random.shuffle(url)
+					
+					x = 1
 				
-					for el in url:
+					while url:
+						el = url.pop(0)
 						print(el, type(el), el[0], el[1])
 						# now = datetime.datetime.now()
 
@@ -1241,13 +1244,23 @@ class Downloader(threading.Thread):
 
 						try:
 							data = func()
+							x = 1
 						except Exception as e:
+							x += 1
 							print(e)
 							if name:
 								print(link, name)
+								err = str(e)
+								if "try again later" in err:
+									self._bot.loop.create_task(msg.channel.send(embed = self._bot.responder.emb_resp(
+										f"Error in {name}\n{link}", f"{err}\nWaiting {x} minutes before continuing!", "error_2"
+									)))
+									url.append(el)
+									time.sleep(60 * x)
+									continue
 								if self._data.get("type") == "default":
 									self._bot.loop.create_task(msg.channel.send(embed = self._bot.responder.emb_resp(
-										f"Error in {name}\n{link}", str(e), "error_2")))
+										f"Error in {name}\n{link}", err, "error_2")))
 									request = self.youtube.search().list(
 										part = "snippet",
 										q = name,
