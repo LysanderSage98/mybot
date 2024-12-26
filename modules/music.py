@@ -353,15 +353,17 @@ class Player(threading.Thread):
 		player = cls.get_player(_id)
 		if not player:
 			return
+
+		item = player._currently_playing[player._queue]
 		to_return = {
-			"title": player._currently_playing[player._queue]["title"],
-			"duration": player._currently_playing[player._queue]["duration"],
-			"link": player._currently_playing[player._queue]["link"],
-			"thumbnail": player._currently_playing[player._queue]["thumbnail"],
-			"description": player._currently_playing[player._queue]["description"],
+			"title": item["title"],
+			"duration": item["duration"],
+			"link": item["link"],
+			"thumbnail": item["thumbnail"],
+			"description": item["description"],
 			"passed": player.get_progress(),
 			"buffer_status": player.get_buffer_progress(),
-			"ffmpeg_options": player._currently_playing[player._queue].get("ffmpeg_options")
+			"ffmpeg_options": item.get("ffmpeg_options")
 		}
 		return to_return
 	
@@ -376,6 +378,30 @@ class Player(threading.Thread):
 		data = {x: len(y) for x, y in player._queues.items()}
 		print(data)
 		return data, player._queue
+	
+	@classmethod
+	def merge_queues(cls, _id, source, dest):
+		"""
+		@param _id: discord guild.id
+		@param source: source queue
+		@param dest: queue to merge source into
+		"""
+		player = cls.get_player(_id)
+		if not player:
+			return
+		print("in merge queues:", _id, source, dest)
+		
+		q1 = player._queues.get(source, None)
+		q2 = player._queues.get(dest)
+		if not (q1 and q2):
+			return -1
+		
+		curr = q1[0]
+		q1.rotate(-1)
+		player.add_multiple(list(q1), new = False)
+		q1.clear()
+		q1.append(curr)
+		return 1
 	
 	@classmethod
 	def switch_queues(cls, _id, val, new = False):
@@ -730,7 +756,7 @@ class Player(threading.Thread):
 				video_data = temp["data"]
 				if video_data["expired"]():
 					print("updating data for", video_data.get("title"))
-					video_data = temp["func"]()
+					video_data = temp["func"](True)
 					new_data = {
 						"data": video_data,
 						"func": temp["func"]
@@ -753,7 +779,7 @@ class Player(threading.Thread):
 				print("playing")
 				try:
 					if not self._v_c.is_playing():
-						show =  True
+						show = True
 						self._v_c.play(self.source, after = self.after)
 				except discord.ClientException as e:
 					print(e)
@@ -768,10 +794,11 @@ class Player(threading.Thread):
 				
 			except Exception as e:
 				print("VoiceClient:", self._v_c)
-				extra = ""
+				removed = self._queues[self._queue].popleft()
+				extra = f"\nSkipping {removed['data']['title']}"
 				self._error_count += 1
 				if self._error_count == 10:
-					extra = "\nQuitting, too many errors in a row"
+					extra += "\nQuitting, too many errors in a row"
 					self.stop()
 				print(traceback.extract_tb(e.__traceback__))
 				self._data["loop"].create_task(
@@ -815,7 +842,7 @@ class Player(threading.Thread):
 			# print("loop:", self._loop)
 			
 			if self._loop == "stop":
-				pass
+				return
 			
 			elif self._loop == "all":
 				self._queues[self._queue].append(current)
@@ -872,6 +899,9 @@ class Player(threading.Thread):
 
 
 class Downloader(threading.Thread):
+	
+	iso_duration_values = ["hours", "minutes", "seconds"]
+	iso_duration_regex = "PT" + "".join(map(lambda el: rf"(?P<{el}>)\d*{el[0].upper()}", iso_duration_values))
 	
 	class Comp(dict):
 		
@@ -971,9 +1001,37 @@ class Downloader(threading.Thread):
 		self._work = False
 		self._queue.queue.clear()
 		self._queue.put_nowait(None)
+		
+	def get_video_details(self, ids: list[str]):
+		def duration_to_seconds(duration: str):
+			match = re.search(self.iso_duration_regex, duration)
+			matches = match.groupdict()
+			if not matches:
+				return 0
+			return datetime.timedelta(
+				**dict(map(lambda item: (item[0], int(item[1] or 0)), matches.items()))).total_seconds()
+		
+		_api_args = self._api_args.copy()
+		_api_args["part"] = "snippet,contentDetails"
+		curr = 0
+		count = len(ids)
+		res = []
+		while curr * 50 < count:
+			to_search = ids[curr * 50: (curr + 1) * 50]
+			curr += 1
+			_id = ",".join(to_search)
+			_api_args["id"] = _id
+			request = self.youtube.videos().list(**_api_args)
+			response = request.execute()
+			times = map(lambda el: (el["snippet"]["title"], duration_to_seconds(el["contentDetails"]["duration"])),
+						response.get("items", []))
+			res.extend(times)
+		ret = list(map(lambda x: (x[0], *x[1]), zip(ids, res)))
+		return ret
 	
 	def run(self):
 		print("Started", self)
+		api_args = self._api_args.copy()
 		# def get_urls(item_list):
 		# 	return map(lambda item: u.concat(("watch", "v"), item["contentDetails"]["videoId"]), item_list)
 		
@@ -992,8 +1050,6 @@ class Downloader(threading.Thread):
 			
 			video_url = u.to_yt_url("v", video_details["videoId"])
 			duration = int(video_details["lengthInSeconds"])
-			# channel = video_details["channelId"]
-			# desc = video_details["shortDescription"]
 			thumbnails = video_url.get("thumbnail", {}).get("thumbnails", {})
 			thumbnails = filter(lambda thumbnail: "webp" not in thumbnail["url"], thumbnails)
 			thumbnails = sorted(thumbnails, key = lambda x: (x.get("height") or 0) * (x.get("width") or 0))
@@ -1005,27 +1061,41 @@ class Downloader(threading.Thread):
 			except AttributeError:
 				expired = (lambda: True)
 			
-		def clean_ytdl(d: dict):
-			if not d:
-				return None
-			video_url = d.get("url")
-			duration = datetime.timedelta(seconds = d.get("duration"))
-			check = datetime.timedelta(minutes = 5)
-			try:
-				expiration_time = datetime.datetime.fromtimestamp(int(re.search(r"expire=(\d+)", video_url).group(1)))
-				expired = (lambda: expiration_time - duration - datetime.datetime.now() < check)
-			except AttributeError:
+		def clean_ytdl(_url, name, _dur, load = False):
+			if load:
+				d = self._ytdl.extract_info(_url, download = False)
+				if not d:
+					return None
+				video_url = d.get("url")
+				_dur = d.get("duration")
+				check = 5 * 60
+				try:
+					expiration_time = int(re.search(r"expire=(\d+)", video_url).group(1))
+					expired = (lambda: expiration_time - _dur - datetime.datetime.now(datetime.UTC).timestamp() < check)
+				except AttributeError:
+					expired = (lambda: True)
+					
+				thumbnails = filter(lambda thumbnail: "webp" not in thumbnail["url"], d.get("thumbnails"))
+				thumbnails = sorted(thumbnails, key = lambda x: (x.get("height") or 0) * (x.get("width") or 0))
+				thumbnail_url = thumbnails[-1].get("url")
+				name = d.get("title")
+				webpage = d.get("webpage_url")
+				desc = d.get("description")
+			else:
+				webpage = ""
+				desc = ""
+				thumbnail_url = ""
+				video_url = u.to_yt_url("v", _url)
 				expired = (lambda: True)
-			thumbnails = filter(lambda thumbnail: "webp" not in thumbnail["url"], d.get("thumbnails"))
-			thumbnails = sorted(thumbnails, key = lambda x: (x.get("height") or 0) * (x.get("width") or 0))
+			
 			new_item = {
-				"title": d.get("title"),
-				"link": d.get("webpage_url"),
-				"duration": duration,
+				"title": name,
+				"link": webpage,
+				"duration": datetime.timedelta(seconds = _dur),
 				"start": None,
 				"end": None,
-				"description": d.get("description"),
-				"thumbnail": thumbnails[-1].get("url"),
+				"description": desc,
+				"thumbnail": thumbnail_url,
 				"url": video_url,
 				"expired": expired,
 				"user": self._data.get("author")
@@ -1082,10 +1152,10 @@ class Downloader(threading.Thread):
 					msg = new_data.get("msg")  # sent by bot, so the bot can edit it as well
 					# elf._playlist = ""
 					playlist = []
-					playlist_id = re.search("list=(.{18,34})", url, re.I).group(1)
-					self._api_args["playlistId"] = playlist_id
+					playlist_id = url.split("=")[1]
+					api_args["playlistId"] = playlist_id
 					
-					request = self.youtube.playlistItems().list(**self._api_args)
+					request = self.youtube.playlistItems().list(**api_args)
 					response = request.execute()
 					if response.get("error"):
 						print(response)
@@ -1123,8 +1193,8 @@ class Downloader(threading.Thread):
 						update_playlist = False
 					
 					if update_playlist:
-						self._api_args["part"] = "snippet"
-						request = self.youtube.playlistItems().list(**self._api_args)
+						api_args["part"] = "snippet"
+						request = self.youtube.playlistItems().list(**api_args)
 						response = request.execute()
 						next_page_token = response.get("nextPageToken")
 						items = get_id(response.get("items"))
@@ -1132,8 +1202,8 @@ class Downloader(threading.Thread):
 						
 						while next_page_token:
 							print(next_page_token)
-							self._api_args["pageToken"] = next_page_token
-							request = self.youtube.playlistItems().list(**self._api_args)
+							api_args["pageToken"] = next_page_token
+							request = self.youtube.playlistItems().list(**api_args)
 							response = request.execute()
 							
 							if response.get("error"):
@@ -1150,9 +1220,7 @@ class Downloader(threading.Thread):
 							
 							items = get_id(response.get("items"))
 							playlist.extend(items)
-						if "pageToken" in self._api_args:
-							self._api_args.pop("pageToken")
-							
+						playlist = self.get_video_details(playlist)
 						self._coll.find_one_and_update({"name": playlist_id}, {"$set": {"items": playlist}})
 					
 					new_data["url"] = playlist
@@ -1162,9 +1230,9 @@ class Downloader(threading.Thread):
 	
 				elif "watch" in url:
 					msg = new_data.get("msg")  # sent by bot, so the bot can edit it as well
-					func = (lambda own_url = url: clean_ytdl(self._ytdl.extract_info(own_url, download = False)))
+					func = (lambda load, own_url = url: clean_ytdl(own_url, "", 0, load))
 					try:
-						data = func()
+						data = func(True)
 					except Exception as e:
 						print(e)
 						if self._data.get("type") == "default":
@@ -1211,20 +1279,20 @@ class Downloader(threading.Thread):
 	
 				elif isinstance(url, list):
 					msg = new_data.get("msg")  # sent by bot, so the bot can edit it as well
-					playlist_name = new_data.get("play_all")
+					# playlist_name = new_data.get("play_all")
 					results = []
-					track_data = None
+					# track_data = None
 					
 					if self._data.get("type") == "default":
 						update_msg(msg, "Estimated time:", str(datetime.timedelta(seconds = len(url))), "info")
 					if new_data.pop("sh", None):
 						random.shuffle(url)
 					
-					x = 1
+					# x = 1
 				
 					while url:
 						el = url.pop(0)
-						print(el, type(el), el[0], el[1])
+						print(el, type(el), el[0], el[1], el[2])
 						# now = datetime.datetime.now()
 
 						if not self._work:
@@ -1232,106 +1300,101 @@ class Downloader(threading.Thread):
 								update_msg(msg, "Aborted adding the playlist", "", "info")
 							break
 							
-						if type(el) in (tuple, list):
-							link = el[0]
-							name = el[1]
-
-						else:
-							link = el
-							name = ""
-
-						func = (lambda save_url = link: clean_ytdl(self._ytdl.extract_info(save_url, download = False)))
-
-						try:
-							data = func()
-							x = 1
-						except Exception as e:
-							x += 1
-							print(e)
-							if name:
-								print(link, name)
-								err = str(e)
-								if "try again later" in err:
-									self._bot.loop.create_task(msg.channel.send(embed = self._bot.responder.emb_resp(
-										f"Error in {name}\n{link}", f"{err}\nWaiting {x} minutes before continuing!", "error_2"
-									)))
-									url.append(el)
-									time.sleep(60 * x)
-									continue
-								if self._data.get("type") == "default":
-									self._bot.loop.create_task(msg.channel.send(embed = self._bot.responder.emb_resp(
-										f"Error in {name}\n{link}", err, "error_2")))
-									request = self.youtube.search().list(
-										part = "snippet",
-										q = name,
-										type = "video"
-									)
-									response = request.execute()
-									if not response["items"]:
-										self._bot.loop.create_task(msg.channel.send("No alternative video found!"))
-										continue
-									try:
-										if track_data and len(url) >= 30:
-											dur = track_data["data"]["duration"] - datetime.timedelta(seconds = 30)
-										else:
-											dur = datetime.timedelta(seconds = 60 * 5)
-										new_url = u.to_yt_url("v", response["items"][0]["id"]["videoId"])
-										content = f"{new_data.get('author').mention}\nDo you want to add {new_url} instead?"
-										x = int((datetime.datetime.now(datetime.UTC) + dur).timestamp())
-										content += f"\nTime left to decide: <t:{x}:R>"
-										check_msg = asyncio.run_coroutine_threadsafe(
-											msg.channel.send(content, delete_after = dur.total_seconds() + 30),
-											self._bot.loop
-										).result()
-										
-										future = asyncio.run_coroutine_threadsafe(
-											u.reaction(check_msg, new_data.get("author"), self._bot),
-											self._bot.loop
-										)
-										
-										if future.result(timeout = dur.seconds) == "✅":
-											func = (lambda save_url = new_url: clean_ytdl(
-												self._ytdl.extract_info(save_url, download = False)))
-											data = func()
-											track_data = {
-												"data": data,
-												"func": func
-											}
-											if len(url) < 30:
-												results.append(track_data)
-											else:
-												self._player.add(track_data, new)
-											db.db.get_collection("Playlists").find_one_and_update(
-												{
-													"user": new_data["author"].id,
-													"name": playlist_name
-												}, {
-													"$addToSet": {
-														"songs": [new_url, data["title"]]
-													}
-												}
-											)
-										db.db.get_collection("Playlists").find_one_and_update(  # always delete invalid track
-											{
-												"user": new_data["author"].id,
-												"name": playlist_name
-											}, {
-												"$pull": {
-													"songs": el
-												}
-											}
-										)
-									
-									except TimeoutError:
-										self._bot.loop.create_task(msg.channel.send("You took too long, continuing!"))
-									except KeyError as e:
-										print(e, e.__traceback__.tb_lineno)
-									except Exception as e:
-										print(e, e.__traceback__.tb_lineno)
-								
-							# if self._lock.locked():
-							# 	self._lock.release()
+						if len(el) != 3:
 							continue
+
+						func = (lambda load, _el = el: clean_ytdl(*_el, load))
+
+						# try:
+						data = func(False)
+						#	x = 1
+						# except Exception as e:
+						# 	x += 1
+						# 	print(e)
+						# 	if name:
+						# 		print(link, name)
+						# 		err = str(e)
+						# 		if "try again later" in err:
+						# 			self._bot.loop.create_task(msg.channel.send(embed = self._bot.responder.emb_resp(
+						# 				f"Error in {name}\n{link}", f"{err}\nWaiting {x} minutes before continuing!", "error_2"
+						# 			)))
+						# 			url.append(el)
+						# 			time.sleep(60 * x)
+						# 			continue
+						# 		if self._data.get("type") == "default":
+						# 			self._bot.loop.create_task(msg.channel.send(embed = self._bot.responder.emb_resp(
+						# 				f"Error in {name}\n{link}", err, "error_2")))
+						# 			request = self.youtube.search().list(
+						# 				part = "snippet",
+						# 				q = name,
+						# 				type = "video"
+						# 			)
+						# 			response = request.execute()
+						# 			if not response["items"]:
+						# 				self._bot.loop.create_task(msg.channel.send("No alternative video found!"))
+						# 				continue
+						# 			try:
+						# 				if track_data and len(url) >= 30:
+						# 					dur = track_data["data"]["duration"] - datetime.timedelta(seconds = 30)
+						# 				else:
+						# 					dur = datetime.timedelta(seconds = 60 * 5)
+						# 				new_url = u.to_yt_url("v", response["items"][0]["id"]["videoId"])
+						# 				content = f"{new_data.get('author').mention}\nDo you want to add {new_url} instead?"
+						# 				x = int((datetime.datetime.now(datetime.UTC) + dur).timestamp())
+						# 				content += f"\nTime left to decide: <t:{x}:R>"
+						# 				check_msg = asyncio.run_coroutine_threadsafe(
+						# 					msg.channel.send(content, delete_after = dur.total_seconds() + 30),
+						# 					self._bot.loop
+						# 				).result()
+						#
+						# 				future = asyncio.run_coroutine_threadsafe(
+						# 					u.reaction(check_msg, new_data.get("author"), self._bot),
+						# 					self._bot.loop
+						# 				)
+						#
+						# 				if future.result(timeout = dur.seconds) == "✅":
+						# 					func = (lambda save_url = new_url: clean_ytdl(
+						# 						self._ytdl.extract_info(save_url, download = False)))
+						# 					data = func()
+						# 					track_data = {
+						# 						"data": data,
+						# 						"func": func
+						# 					}
+						# 					if len(url) < 30:
+						# 						results.append(track_data)
+						# 					else:
+						# 						self._player.add(track_data, new)
+						# 					db.db.get_collection("Playlists").find_one_and_update(
+						# 						{
+						# 							"user": new_data["author"].id,
+						# 							"name": playlist_name
+						# 						}, {
+						# 							"$addToSet": {
+						# 								"songs": [new_url, data["title"]]
+						# 							}
+						# 						}
+						# 					)
+						# 				db.db.get_collection("Playlists").find_one_and_update(  # always delete invalid track
+						# 					{
+						# 						"user": new_data["author"].id,
+						# 						"name": playlist_name
+						# 					}, {
+						# 						"$pull": {
+						# 							"songs": el
+						# 						}
+						# 					}
+						# 				)
+						#
+						# 			except TimeoutError:
+						# 				self._bot.loop.create_task(msg.channel.send("You took too long, continuing!"))
+						# 			except KeyError as e:
+						# 				print(e, e.__traceback__.tb_lineno)
+						# 			except Exception as e:
+						# 				print(e, e.__traceback__.tb_lineno)
+						#
+						# 	# if self._lock.locked():
+						# 	# 	self._lock.release()
+						# 	continue
 							
 						track_data = {
 							"data": data,
@@ -1343,7 +1406,7 @@ class Downloader(threading.Thread):
 							self._player.add(track_data, new, True)
 						# print(datetime.datetime.now() - now)
 					else:  # execute when every song has been added to result list
-						if len(url) < 30:
+						if len(results) < 30:
 							self._player.add_multiple(results, new)
 						if self._data.get("type") == "default":
 							update_msg(msg, "Done", "", "ok")
